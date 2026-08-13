@@ -1,0 +1,40 @@
+{
+  "noc": {
+    "version": "NOC 2021 Version 1.0",
+    "source": "Statistics Canada",
+    "levels": [
+      "Broad occupational category",
+      "Major group",
+      "Sub-major group",
+      "Minor group",
+      "Unit group"
+    ],
+    "counts": {
+      "1": 10,
+      "2": 45,
+      "3": 89,
+      "4": 162,
+      "5": 516
+    },
+    "exampleTitles": 27935,
+    "licence": "Statistics Canada Open Licence"
+  },
+  "soc": {
+    "version": "SOC 2020",
+    "source": "Office for National Statistics (UK)",
+    "levels": [
+      "Major group",
+      "Sub-major group",
+      "Minor group",
+      "Unit group"
+    ],
+    "counts": {
+      "1": 9,
+      "2": 26,
+      "3": 104,
+      "4": 412
+    },
+    "relatedTitles": 2091,
+    "licence": "Open Government Licence v3.0"
+  }
+}

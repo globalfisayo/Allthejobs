@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>All the Jobs — The Garden of Work</title>
+<meta name="description" content="Every job under the sun, planted in one garden. The complete NOC 2021 and SOC 2020 occupational classifications, grown into the organograms of twelve archetypal firms.">
+<meta property="og:title" content="All the Jobs — The Garden of Work">
+<meta property="og:description" content="Every job under the sun: 516 NOC and 412 SOC unit groups, 12 firm-type trees, 28,000+ job titles.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌳</text></svg>">
+<link rel="stylesheet" href="css/garden.css">
+</head>
+<body>
+<a class="skip" href="#view">Skip to content</a>
+
+<header class="topbar" id="topbar">
+  <a class="wordmark" href="#/" aria-label="All the Jobs — home">
+    <svg class="wm-tree" viewBox="0 0 40 44" aria-hidden="true">
+      <path d="M20 43 V24" stroke="#6f4e37" stroke-width="4" stroke-linecap="round"/>
+      <circle cx="20" cy="15" r="12.5" fill="#2e7d43"/>
+      <circle cx="11" cy="20" r="7.5" fill="#4a9d5f"/>
+      <circle cx="29" cy="20" r="7.5" fill="#256b39"/>
+      <circle cx="20" cy="8" r="5.5" fill="#c9971c"/>
+    </svg>
+    <span class="wm-text"><strong>All&nbsp;the&nbsp;Jobs</strong><em>the garden of work</em></span>
+  </a>
+
+  <nav class="topnav" aria-label="Primary">
+    <a href="#/" data-nav="garden">Garden</a>
+    <a href="#/atlas" data-nav="atlas">Atlas</a>
+    <a href="#/about" data-nav="about">About</a>
+  </nav>
+
+  <div class="topbar-tools">
+    <div class="searchbox" id="searchbox">
+      <svg viewBox="0 0 20 20" class="search-ico" aria-hidden="true"><circle cx="9" cy="9" r="6" fill="none" stroke="currentColor" stroke-width="2"/><path d="M13.5 13.5 18 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      <input id="search-input" type="search" placeholder="Find any job… teller, beekeeper, pilot" autocomplete="off" spellcheck="false" aria-label="Search all jobs">
+      <div class="search-results" id="search-results" role="listbox" hidden></div>
+    </div>
+    <div class="sys-toggle" id="sys-toggle" role="group" aria-label="Classification system">
+      <button data-sys="noc" title="Canada — NOC 2021"><span class="flag">🇨🇦</span><span class="lbl">NOC</span></button>
+      <button data-sys="soc" title="United Kingdom — SOC 2020"><span class="flag">🇬🇧</span><span class="lbl">SOC</span></button>
+    </div>
+  </div>
+</header>
+
+<main id="view" tabindex="-1"></main>
+
+<div class="card-layer" id="card-layer" hidden>
+  <div class="card-scrim" id="card-scrim"></div>
+  <aside class="rolecard" id="rolecard" role="dialog" aria-modal="true" aria-label="Role details"></aside>
+</div>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
