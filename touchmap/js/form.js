@@ -130,8 +130,8 @@ export function touchForm(model, opts) {
   }
 
   /* count and duration: built once, values synced, so typing never loses focus */
-  const countInput = h('input', { class: 'num', type: 'text', inputmode: 'numeric', 'aria-label': 'Count', autocomplete: 'off' });
-  const perInput = h('input', { class: 'num', type: 'text', inputmode: 'decimal', 'aria-label': 'Duration per occurrence in minutes', placeholder: '0', autocomplete: 'off' });
+  const countInput = h('input', { class: 'num-in', type: 'text', inputmode: 'numeric', 'aria-label': 'Count', autocomplete: 'off' });
+  const perInput = h('input', { class: 'num-in', type: 'text', inputmode: 'decimal', 'aria-label': 'Duration per occurrence in minutes', placeholder: '0', autocomplete: 'off' });
   const perNote = h('span', { class: 'field-note' });
   const autoBtn = h('button', { type: 'button', class: 'link-btn small', onclick: () => { model.durManual = false; sync(); onChange(); } }, icon('reset'), 'Use the timer');
   const totalOut = h('output', { class: 'calc-val' });

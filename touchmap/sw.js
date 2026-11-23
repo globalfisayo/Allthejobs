@@ -1,11 +1,11 @@
 // Offline shell: everything the app needs is cached on first visit, so it works on a
 // line with no Wi-Fi. Bump VERSION when files change; old caches are dropped.
-const VERSION = 'touchmap-v1';
+const VERSION = 'touchmap-v2';
 const FILES = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css',
   'js/app.js', 'js/framework.js', 'js/framework-data.js', 'js/model.js', 'js/store.js', 'js/ui.js',
   'js/form.js', 'js/capture.js', 'js/log.js', 'js/insights.js', 'js/analysis.js', 'js/run.js',
-  'js/guide.js', 'js/export.js', 'js/xlsx.js', 'js/demo.js',
+  'js/guide.js', 'js/export.js', 'js/xlsx.js', 'js/demo.js', 'js/sync.js', 'js/sync-ui.js', 'sync/apps-script.gs',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png', 'icons/icon-maskable-512.png',
 ];
 
