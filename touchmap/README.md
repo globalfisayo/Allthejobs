@@ -34,12 +34,25 @@ It works offline after the first visit, so patchy Wi-Fi on the line doesn't matt
    Picking a type of touch shows its *How to count* guide and pre-selects the guide's
    Physical/Information answer, with a warning if you change it. The stopwatch survives
    a reload or a locked screen, and the screen stays awake while it runs.
-4. **Log** tab: tap a touch to edit or delete it. Touches saved with **Next touch** that
-   still need answers are flagged *Needs details*.
+4. **Log** tab: **swipe a touch left to delete it** (with Undo) or **right to edit it**,
+   or tap it to open the editor. A short swipe springs back, and scrolling up and down
+   works as normal. Touches saved with **Next touch** that still need answers are flagged
+   *Needs details*.
 5. **Analysis** tab: everything on the template's Analysis sheet, interactive. See
    [Analysis and presenting](#analysis-and-presenting).
-6. **Guide** tab: the How-to-use rules, the decision order, and every type's counting
-   guide, all searchable.
+6. **Guide** tab, for new touch mappers:
+   - **The K3 line: tap a zone.** A drawing of the line (preform feed → ErgoBloc block
+     with blow moulder, labeller, filler and capper → coder → inspection → conveyors →
+     packer → palletiser, plus mixer, CIP, line-side store and control room).
+   - **Tap any zone** for the touches that typically happen there, grouped by category,
+     each with its *How to count* guide. **Log this touch** opens Capture with zone,
+     category, type and touch type already filled.
+   - **Every machine** also lists the touches that can happen anywhere: safety, CIL, PM,
+     breakdowns and defects.
+   - **This run** shades each zone by the minutes logged there and badges it with the
+     touch count. Tapping a zone shows what was logged.
+   - Also on the tab: the How-to-use rules, the decision order, and every type's counting
+     guide, all searchable.
 
 ## Team sync: one log across every phone and tablet
 
@@ -145,6 +158,10 @@ Two adjustments were made to the source:
 - *Line speed & packer* had no guide text in the sheet, so it shares the next row's
   guide (speed and packer settings).
 
+Which touches happen at which zone (`js/linemap.js`) is authored from the guide texts,
+because the framework itself doesn't say. Edit `ZONE_INFO` to match the line. A test
+fails if any of the 74 types is left off the map or misspelled.
+
 ## Development
 
 No build step and no dependencies: plain HTML, CSS and ES modules.
@@ -157,6 +174,8 @@ node tests/mock-sync-server.mjs 8790  # local stand-in for the Apps Script; conn
 
 | Path | What it holds |
 |---|---|
+| `js/linemap.js` | The line drawing and its zone-to-touch mapping, covering all 74 types |
+| `js/swipe.js` | Swipe left/right on log rows |
 | `js/sync.js`, `js/sync-ui.js` | Team sync: change queue and merge, Run card, join link |
 | `sync/apps-script.gs` | The Google Sheets side of Team sync, pasted into Apps Script |
 | `tests/fake-sheets.mjs`, `tests/mock-sync-server.mjs` | Run the real `.gs` against an in-memory sheet, and serve it locally for browser tests |

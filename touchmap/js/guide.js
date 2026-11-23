@@ -1,6 +1,7 @@
 // Guide: the 'How to use' sheet and the Detailed Categories block, browsable on the line.
 import { CATEGORIES, CATEGORY_RULE, DECISION, RULES, HOW_TO_COUNT, TOUCH_TYPE_RULE, PARETO_NOTE, OTHER_ADVICE } from './framework.js';
 import { h, clear, icon } from './ui.js';
+import { lineMapCard } from './linemap.js';
 
 export function renderGuide(root) {
   const order = ['q1', 'q2', 'q3', 'q4', 'q5', 'q6', 'q7', 'q8', 'q8b', 'q9', 'q10', 'q11', 'q12', 'q13', 'q14', 'q15'];
@@ -27,6 +28,8 @@ export function renderGuide(root) {
     h('div', { class: 'view-head' }, h('div', {},
       h('h1', { class: 'view-title', text: 'Guide' }),
       h('p', { class: 'view-sub', text: 'K3 Touch Definition & Category Framework, v0.1. Read before you start; check on the line when unsure.' }))),
+
+    lineMapCard(),
 
     h('div', { class: 'grid-2' },
       h('section', { class: 'card' },
