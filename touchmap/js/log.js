@@ -1,7 +1,7 @@
 // The observation log: every touch, newest first, tap to edit.
 import { CAT_BY_CODE } from './framework.js';
 import { finalise, missingFields, ordered, totalMinutes, perOccurrence, fmtMin, FIELD_LABEL, blankTouch } from './model.js';
-import { state, save, activeRun } from './store.js';
+import { state, save, activeRun, markTouch, removeTouch, restoreTouch } from './store.js';
 import { touchForm } from './form.js';
 import { h, clear, icon, toast, openModal, closeModal, fmt } from './ui.js';
 
@@ -104,17 +104,19 @@ export function openEditor(id, onDone) {
   const doSave = () => {
     const miss = missingFields(model);
     const t = finalise(model, { now: new Date() });
-    run.touches[idx] = t;
+    const at = run.touches.findIndex(x => x.id === id);
+    if (at < 0) { closeModal(); toast('That touch was deleted on another device.', { tone: 'bad' }); onDone?.(); return; }
+    run.touches[at] = t;
+    markTouch(run, t.id);
     save(); closeModal();
     toast(miss.length ? `Touch #${num} saved. Still needs ${miss.map(m => FIELD_LABEL[m]).join(', ')}.` : `Touch #${num} updated.`);
     onDone?.();
   };
   const doDelete = () => {
-    const at = run.touches.findIndex(t => t.id === id);
-    if (at < 0) return;
-    const [gone] = run.touches.splice(at, 1);
+    const gone = removeTouch(run, id);
+    if (!gone) return;
     save(); closeModal();
-    toast(`Touch #${num} deleted.`, { action: { label: 'Undo', fn: () => { run.touches.push(gone); save(); onDone?.(); } }, timeout: 7000 });
+    toast(`Touch #${num} deleted.`, { action: { label: 'Undo', fn: () => { restoreTouch(run, gone); save(); onDone?.(); } }, timeout: 7000 });
     onDone?.();
   };
   const doRepeat = () => {

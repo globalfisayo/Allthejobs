@@ -1,8 +1,9 @@
 // Run: Run Info and the reference frame, lists, and getting data in and out.
 import { referenceCapacity, mergeTouches } from './model.js';
-import { state, save, activeRun, runsList, createRun, deleteRun, nextRunName, storageHealthy } from './store.js';
+import { state, save, activeRun, runsList, createRun, deleteRun, nextRunName, storageHealthy, markRun, markTouch } from './store.js';
 import { buildWorkbook, buildCsv, buildBackup, parseBackup } from './export.js';
 import { demoTouches } from './demo.js';
+import { syncCard } from './sync-ui.js';
 import { h, clear, icon, toast, deliverFile, pickFile, canShareFiles, confirmBox, openModal, closeModal, fmt, stamp, slug } from './ui.js';
 
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
@@ -16,7 +17,7 @@ export function renderRun(root, { onChange } = {}) {
     const input = h('input', { type, value: info[key] ?? '', inputmode, step, min, id: 'ri-' + key, autocomplete: 'off' });
     input.addEventListener('input', () => {
       info[key] = type === 'number' ? (input.value === '' ? '' : Number(input.value.replace(',', '.'))) : input.value;
-      save(); paintCapacity();
+      markRun(run); save(); paintCapacity();
     });
     return h('label', { class: 'f', for: 'ri-' + key }, h('span', { class: 'f-label', text: label }), input, hint ? h('span', { class: 'f-hint', text: hint }) : null);
   };
@@ -48,7 +49,7 @@ export function renderRun(root, { onChange } = {}) {
   runSelect.addEventListener('change', () => { state.activeRunId = runSelect.value; save(); rerender(); });
 
   const nameInput = h('input', { type: 'text', value: run.name, id: 'run-name', autocomplete: 'off' });
-  nameInput.addEventListener('change', () => { run.name = nameInput.value.trim() || run.name; save(); rerender(); });
+  nameInput.addEventListener('change', () => { run.name = nameInput.value.trim() || run.name; markRun(run); save(); rerender(); });
 
   const shareable = canShareFiles();
   const fileBase = () => `${slug(run.name)}-${stamp()}`;
@@ -78,7 +79,7 @@ export function renderRun(root, { onChange } = {}) {
           same ? `Merge into “${state.runs[data.run.id].name}” (same run)` : `Merge into the current run, “${run.name}”`),
         !same ? h('button', { type: 'button', class: 'btn ghost', onclick: () => {
           const r = createRun(data.run.name, { ...data.run.info });
-          r.touches = data.run.touches; save(); closeModal(); toast(`Imported as a new run with ${r.touches.length} touches.`); rerender();
+          r.touches = data.run.touches; r.touches.forEach(t => markTouch(r, t.id)); save(); closeModal(); toast(`Imported as a new run with ${r.touches.length} touches.`); rerender();
         } }, 'Add as a separate run') : null,
         h('button', { type: 'button', class: 'btn ghost', onclick: () => closeModal() }, 'Cancel'))),
     { label: 'Import a backup' });
@@ -87,6 +88,8 @@ export function renderRun(root, { onChange } = {}) {
   function doMerge(target, data) {
     const m = mergeTouches(target.touches, data.run.touches);
     target.touches = m.touches;
+    const incoming = new Set(data.run.touches.map(t => t.id));
+    target.touches.filter(t => incoming.has(t.id)).forEach(t => markTouch(target, t.id));
     state.activeRunId = target.id;
     save(); closeModal();
     toast(`Merged: ${m.added} new, ${m.updated} updated.`);
@@ -106,7 +109,7 @@ export function renderRun(root, { onChange } = {}) {
   }
 
   function loadDemo() {
-    const r = createRun('Demo shift (sample data)', { ...run.info, skus: 'Demo: 2 L to 0.5 L', changeovers: '1', cips: '1', observers: 'Demo' });
+    const r = createRun('Demo shift (sample data)', { ...run.info, skus: 'Demo: 2 L to 0.5 L', changeovers: '1', cips: '1', observers: 'Demo' }, { localOnly: true });
     r.touches = demoTouches(); save();
     toast('Demo run loaded. Open Analysis to see it.', { action: { label: 'Analysis', fn: () => { location.hash = '#analysis'; } } });
     rerender();
@@ -121,6 +124,8 @@ export function renderRun(root, { onChange } = {}) {
       h('p', { class: 'view-sub', text: 'Fill this in before observing. It sets the reference frame every mapped total is compared against.' }))),
 
     !storageHealthy() ? h('div', { class: 'banner bad' }, icon('warn'), 'This browser is refusing to save. Private browsing? Export now and switch to a normal window.') : null,
+
+    syncCard(),
 
     h('div', { class: 'grid-2' },
       h('section', { class: 'card' },
@@ -154,7 +159,7 @@ export function renderRun(root, { onChange } = {}) {
     h('section', { class: 'card' },
       h('h2', { class: 'card-h', text: 'Export & backup' }),
       h('p', { class: stale ? 'warn-line' : 'muted' }, stale ? icon('warn') : null,
-        `Touches live on this device only. Last export of this run: ${backupAge}.` + (stale ? ' Export at the end of each shift.' : '')),
+        (state.sync.url ? `Team sync keeps the shared copy in the Google Sheet. Last export of this run: ${backupAge}.` : `Touches live on this device only. Last export of this run: ${backupAge}.` + (stale ? ' Export at the end of each shift, or turn on Team sync.' : ''))),
       h('div', { class: 'export-grid' },
         h('div', { class: 'export' },
           h('h3', { text: 'Excel workbook' }),
@@ -186,7 +191,7 @@ export function renderRun(root, { onChange } = {}) {
       h('div', { class: 'row-gap' },
         h('button', { type: 'button', class: 'btn ghost', onclick: loadDemo }, icon('chart'), 'Load a demo run'),
         h('button', { type: 'button', class: 'btn danger-ghost', onclick: removeRun }, icon('trash'), `Delete “${run.name}”`)),
-      h('p', { class: 'muted', text: 'The demo opens as its own run, so it never mixes with real observations. Delete it when you are done.' }))));
+      h('p', { class: 'muted', text: 'The demo opens as its own run on this device only: it never mixes with real observations and never goes to the team sheet. Delete it when you are done.' }))));
 
   paintCapacity();
 }

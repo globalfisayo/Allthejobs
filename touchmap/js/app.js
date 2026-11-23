@@ -6,6 +6,8 @@ import { renderInsights } from './insights.js';
 import { renderRun } from './run.js';
 import { renderGuide } from './guide.js';
 import { closeModal } from './ui.js';
+import { startSync, onSync } from './sync.js';
+import { paintSyncPill, handleJoin } from './sync-ui.js';
 
 const ROUTES = {
   capture: (el) => renderCapture(el, { onSaved: paintChrome }),
@@ -18,7 +20,7 @@ const ROUTES = {
 const view = document.getElementById('view');
 
 function current() {
-  const r = (location.hash || '#capture').slice(1);
+  const r = (location.hash || '#capture').slice(1).split(/[?&=]/)[0];
   return ROUTES[r] ? r : 'capture';
 }
 
@@ -28,6 +30,7 @@ function paintChrome() {
   const badge = document.getElementById('log-count');
   badge.textContent = run.touches.length ? String(run.touches.length) : '';
   badge.hidden = !run.touches.length;
+  paintSyncPill();
   const live = document.getElementById('live-dot');
   live.hidden = !timer.running();
   for (const a of document.querySelectorAll('[data-route]')) {
@@ -38,7 +41,16 @@ function paintChrome() {
 }
 
 function route() {
+  if (location.hash.startsWith('#join=')) {
+    const params = new URLSearchParams(location.hash.slice(1));
+    handleJoin(params).then(() => paintChrome());
+    return renderRoute();
+  }
   closeModal();
+  renderRoute();
+}
+
+function renderRoute() {
   stopTicking();
   const r = current();
   document.body.dataset.route = r;
@@ -47,11 +59,26 @@ function route() {
   window.scrollTo(0, 0);
 }
 
+// When another device's touches arrive, refresh the views that show them (not Capture or Run,
+// where someone may be typing).
+onSync((changed) => {
+  paintChrome();
+  if (!changed) return;
+  const r = current();
+  const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || '');
+  if (r === 'log' || r === 'analysis' || (r === 'run' && !typing && !document.getElementById('modal').open)) {
+    const y = window.scrollY;
+    ROUTES[r](view);
+    window.scrollTo(0, y);
+  }
+});
+
 window.addEventListener('hashchange', route);
 window.addEventListener('storage', (e) => { if (e.key === 'touchmap:v1') location.reload(); });
 setInterval(() => { document.getElementById('live-dot').hidden = !timer.running(); }, 1000);
 
 route();
+startSync();
 
 // Warn before closing the tab mid-touch (the timer would survive, but say so).
 window.addEventListener('beforeunload', (e) => {

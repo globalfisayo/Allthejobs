@@ -1,4 +1,5 @@
 // Everything lives in this browser's localStorage, one key, saved on every change.
+// With Team sync on, changed touches and runs are also queued for the team's Google Sheet.
 import { FRAMEWORK, DEFAULT_INFO } from './framework.js';
 import { blankTouch, uid } from './model.js';
 
@@ -8,12 +9,20 @@ function blankTimer() {
   return { accMs: 0, runningSince: null, firstStart: null, lastStop: null };
 }
 
-function newRunObj(name, info = {}) {
-  return { id: uid(), name, createdAt: new Date().toISOString(), info: { ...DEFAULT_INFO, ...info }, touches: [], lastExport: null };
+function blankSync() {
+  return { url: '', key: '', since: 0, dirtyTouches: {}, dirtyRuns: {}, tombstones: [], lastOk: null, error: null };
+}
+
+function newRunObj(name, info = {}, { localOnly = false, pristine = false } = {}) {
+  const now = new Date().toISOString();
+  return {
+    id: uid(), name, createdAt: now, updatedAt: pristine ? null : now,
+    info: { ...DEFAULT_INFO, ...info }, touches: [], lastExport: null, localOnly,
+  };
 }
 
 function fresh() {
-  const run = newRunObj('Observation 1');
+  const run = newRunObj('Observation 1', {}, { pristine: true });
   return {
     format: 1,
     observer: '',
@@ -23,6 +32,7 @@ function fresh() {
     draft: blankTouch(),
     timer: blankTimer(),
     lastSavedId: null,
+    sync: blankSync(),
   };
 }
 
@@ -36,7 +46,13 @@ function load() {
     s.lists ??= { zones: [...FRAMEWORK.zones], people: [...FRAMEWORK.people] };
     s.draft ??= blankTouch();
     s.timer ??= blankTimer();
-    for (const r of Object.values(s.runs)) r.info = { ...DEFAULT_INFO, ...r.info };
+    s.sync = { ...blankSync(), ...s.sync };
+    for (const r of Object.values(s.runs)) {
+      r.info = { ...DEFAULT_INFO, ...r.info };
+      if (r.updatedAt === undefined) r.updatedAt = r.touches.length ? r.createdAt : null;
+      // Demo runs stay on the device, never in the team's sheet.
+      if (/^Demo shift/.test(r.name)) r.localOnly = true;
+    }
     return s;
   } catch { return null; }
 }
@@ -62,30 +78,97 @@ export async function askPersist() {
   try { await navigator.storage?.persist?.(); } catch { /* not supported */ }
 }
 
+/* ---------- change tracking for Team sync ---------- */
+export const hooks = { dirty: null };
+const nowIso = () => new Date().toISOString();
+
+/** A touch was added or edited in this run. */
+export function markTouch(run, id) {
+  if (!run || run.localOnly) return;
+  state.sync.dirtyTouches[id] = run.id;
+  if (!run.updatedAt) markRun(run, { quiet: true });
+  hooks.dirty?.();
+}
+
+/** The run's name or Run Info changed. */
+export function markRun(run, { quiet = false } = {}) {
+  if (!run) return;
+  run.updatedAt = nowIso();
+  if (!run.localOnly) state.sync.dirtyRuns[run.id] = 1;
+  if (!quiet) hooks.dirty?.();
+}
+
+/** Delete a touch and leave a marker so the deletion reaches other devices. */
+export function removeTouch(run, id) {
+  const i = run.touches.findIndex(t => t.id === id);
+  if (i < 0) return null;
+  const [gone] = run.touches.splice(i, 1);
+  if (!run.localOnly) {
+    delete state.sync.dirtyTouches[id];
+    state.sync.tombstones.push({ kind: 'touch', id, runId: run.id, deletedAt: nowIso() });
+    hooks.dirty?.();
+  }
+  return gone;
+}
+
+/** Undo a delete: the touch comes back newer than its delete marker, so it wins everywhere. */
+export function restoreTouch(run, t) {
+  t.updatedAt = nowIso();
+  run.touches.push(t);
+  state.sync.tombstones = state.sync.tombstones.filter(x => x.id !== t.id);
+  markTouch(run, t.id);
+}
+
+/** Queue every run and touch on this device: used when a device first connects. */
+export function markEverything() {
+  for (const run of Object.values(state.runs)) {
+    if (run.localOnly) continue;
+    if (run.updatedAt || run.touches.length) state.sync.dirtyRuns[run.id] = 1;
+    for (const t of run.touches) state.sync.dirtyTouches[t.id] = run.id;
+  }
+}
+
+export const pendingCount = () =>
+  Object.keys(state.sync.dirtyTouches).length + Object.keys(state.sync.dirtyRuns).length + state.sync.tombstones.length;
+
+/* ---------- runs ---------- */
 export const activeRun = () => state.runs[state.activeRunId];
 export const runsList = () => Object.values(state.runs).sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
 
-export function createRun(name, info) {
+export function createRun(name, info, { localOnly = false } = {}) {
   const prev = activeRun();
-  const run = newRunObj(name, info ?? { ...prev?.info, from: '', to: '', skus: '', changeovers: '', cips: '' });
+  const run = newRunObj(name, info ?? { ...prev?.info, from: '', to: '', skus: '', changeovers: '', cips: '' }, { localOnly });
   state.runs[run.id] = run;
   state.activeRunId = run.id;
+  if (!localOnly) markRun(run);
   save();
   return run;
 }
 
 export function deleteRun(id) {
-  delete state.runs[id];
-  if (!Object.keys(state.runs).length) {
-    const run = newRunObj('Observation 1');
-    state.runs[run.id] = run;
+  const run = state.runs[id];
+  if (run && !run.localOnly) {
+    for (const t of run.touches) delete state.sync.dirtyTouches[t.id];
+    delete state.sync.dirtyRuns[id];
+    state.sync.tombstones.push({ kind: 'run', id, deletedAt: nowIso() });
+    hooks.dirty?.();
   }
-  if (!state.runs[state.activeRunId]) state.activeRunId = runsList()[0].id;
+  delete state.runs[id];
+  ensureRun();
   save();
 }
 
+/** Always keep at least one run, and an active one. */
+export function ensureRun() {
+  if (!Object.keys(state.runs).length) {
+    const run = newRunObj('Observation 1', {}, { pristine: true });
+    state.runs[run.id] = run;
+  }
+  if (!state.runs[state.activeRunId]) state.activeRunId = runsList()[runsList().length - 1].id;
+}
+
 export function nextRunName() {
-  const n = Object.keys(state.runs).length + 1;
+  const n = Object.values(state.runs).filter(r => !r.localOnly).length + 1;
   return `Observation ${n}`;
 }
 

@@ -1,7 +1,7 @@
 // Capture: the stopwatch dock and the live context form.
 import { CAT_BY_CODE } from './framework.js';
 import { blankTouch, finalise, missingFields, totalMinutes, perOccurrence, fmtClock, fmtMin, minSec, FIELD_LABEL } from './model.js';
-import { state, save, activeRun, timer, askPersist } from './store.js';
+import { state, save, activeRun, timer, askPersist, markTouch, removeTouch } from './store.js';
 import { touchForm } from './form.js';
 import { openEditor } from './log.js';
 import { h, clear, icon, toast, fmt } from './ui.js';
@@ -182,6 +182,7 @@ export function renderCapture(root, { onSaved } = {}) {
     }
     const t = finalise(draft, { observer: state.observer, now: new Date(now) });
     run.touches.push(t);
+    markTouch(run, t.id);
     state.lastSavedId = t.id;
     const carry = { zone: draft.zone, who: draft.who };
     state.draft = blankTouch(carry);
@@ -210,9 +211,8 @@ export function renderCapture(root, { onSaved } = {}) {
   }
 
   function undo(id) {
-    const i = run.touches.findIndex(t => t.id === id);
-    if (i < 0) return;
-    const [t] = run.touches.splice(i, 1);
+    const t = removeTouch(run, id);
+    if (!t) return;
     if (!timer.running() && timer.elapsed() === 0) {
       // Bring it back into the form, with its stopwatch, so nothing is lost.
       state.draft = { ...t, createdAt: null, updatedAt: null, incomplete: false };

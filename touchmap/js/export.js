@@ -142,6 +142,31 @@ export function buildBackup(run, lists, now = new Date()) {
   return JSON.stringify({ app: 'touchmap', format: 1, exportedAt: now.toISOString(), lists, run }, null, 1);
 }
 
+const str = v => (typeof v === 'string' ? v.slice(0, 2000) : '');
+const num = v => (typeof v === 'number' && isFinite(v) ? v : null);
+const CODES = new Set(CATEGORIES.map(c => c.code));
+
+/** Keep only known fields with sane types: used for backups and for touches arriving by sync. */
+export function cleanTouch(t) {
+  return {
+    id: String(t.id).slice(0, 80), zone: str(t.zone), who: str(t.who), planned: ['Planned', 'Unplanned'].includes(t.planned) ? t.planned : '',
+    category: CODES.has(t.category) ? t.category : '', type: str(t.type), touchType: ['Physical', 'Information'].includes(t.touchType) ? t.touchType : '',
+    count: num(t.count) ?? 1, countMode: t.countMode === 'one' ? 'one' : 'all', perOccMin: num(t.perOccMin), durManual: !!t.durManual,
+    timedSec: num(t.timedSec), start: str(t.start) || null, end: str(t.end) || null, description: str(t.description),
+    route: str(t.route) || 'To be decided', observer: str(t.observer), createdAt: str(t.createdAt) || null,
+    updatedAt: str(t.updatedAt) || null, incomplete: !!t.incomplete,
+  };
+}
+
+export function cleanInfo(info) {
+  const out = {};
+  for (const [k, v] of Object.entries(info || {})) {
+    if (typeof v === 'string') out[k] = v.slice(0, 500);
+    else if (typeof v === 'number' && isFinite(v)) out[k] = v;
+  }
+  return out;
+}
+
 /** Validate a backup file's shape before it touches the store. */
 export function parseBackup(text) {
   let data;
@@ -149,19 +174,28 @@ export function parseBackup(text) {
   if (data?.app !== 'touchmap' || !data.run || !Array.isArray(data.run.touches)) {
     throw new Error('That file is not a Touch Map backup.');
   }
-  const codes = new Set(CATEGORIES.map(c => c.code));
-  const str = v => (typeof v === 'string' ? v.slice(0, 2000) : '');
-  const num = v => (typeof v === 'number' && isFinite(v) ? v : null);
-  const touches = data.run.touches.filter(t => t && typeof t.id === 'string').map(t => ({
-    id: t.id.slice(0, 80), zone: str(t.zone), who: str(t.who), planned: ['Planned', 'Unplanned'].includes(t.planned) ? t.planned : '',
-    category: codes.has(t.category) ? t.category : '', type: str(t.type), touchType: ['Physical', 'Information'].includes(t.touchType) ? t.touchType : '',
-    count: num(t.count) ?? 1, countMode: t.countMode === 'one' ? 'one' : 'all', perOccMin: num(t.perOccMin), durManual: !!t.durManual,
-    timedSec: num(t.timedSec), start: str(t.start) || null, end: str(t.end) || null, description: str(t.description),
-    route: str(t.route) || 'To be decided', observer: str(t.observer), createdAt: str(t.createdAt) || null,
-    updatedAt: str(t.updatedAt) || null, incomplete: !!t.incomplete,
-  }));
+  const touches = data.run.touches.filter(t => t && typeof t.id === 'string').map(cleanTouch);
   return {
     lists: data.lists,
-    run: { id: str(data.run.id) || null, name: str(data.run.name) || 'Imported run', info: data.run.info || {}, touches },
+    run: { id: str(data.run.id) || null, name: str(data.run.name) || 'Imported run', info: cleanInfo(data.run.info), touches },
   };
+}
+
+/** Readable cells for the team sheet's Touches tab (order = TOUCH_COLS in sync/apps-script.gs). */
+export function syncCells(t, run) {
+  const per = perOccurrence(t);
+  return [
+    run.name, t.zone || '', t.planned || '', CAT_BY_CODE[t.category]?.name || '', t.type || '', t.touchType || '',
+    t.start || '', t.end || '', t.timedSec != null ? Math.round(t.timedSec) : '', Number(t.count) || 0,
+    per == null ? '' : round(per, 4), round(totalMinutes(t), 4), t.description || '', t.route || 'To be decided',
+    t.who || '', t.observer || '', t.incomplete ? 'Needs details' : 'Complete',
+  ];
+}
+
+/** Readable cells for the Runs tab (order = RUN_COLS in sync/apps-script.gs). */
+export function runCells(run) {
+  const i = run.info || {};
+  return [run.name, i.line || '', i.plant || '', i.from || '', i.to || '', i.skus || '', i.changeovers || '', i.cips || '',
+    i.observers || '', Number(i.operators) || 0, Number(i.shiftHours) || 0, Number(i.breakHours) || 0, Number(i.shifts) || 1,
+    referenceCapacity(i).capacity];
 }

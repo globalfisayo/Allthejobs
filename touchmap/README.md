@@ -36,31 +36,88 @@ It works offline after the first visit, so patchy Wi-Fi on the line doesn't matt
    a reload or a locked screen, and the screen stays awake while it runs.
 4. **Log** tab: tap a touch to edit or delete it. Touches saved with **Next touch** that
    still need answers are flagged *Needs details*.
-5. **Analysis** tab: covers everything on the template's Analysis sheet:
-   - headline coverage against the reference frame;
-   - planned vs unplanned;
-   - by category, as a Pareto with the top three called out;
-   - by touch type;
-   - by zone.
-
-   It adds the top types of touch and person observed, filters by day and observer when
-   there is more than one, and has a table behind every chart.
+5. **Analysis** tab: everything on the template's Analysis sheet, interactive. See
+   [Analysis and presenting](#analysis-and-presenting).
 6. **Guide** tab: the How-to-use rules, the decision order, and every type's counting
    guide, all searchable.
 
-## Getting data out, and merging a team
+## Team sync: one log across every phone and tablet
 
-Touches are stored **in the browser on each device** (localStorage). Nothing is sent
-anywhere. Each observer's device holds its own log, so:
+Without sync, each device keeps its own log in its browser. A touch logged on an iPhone
+won't appear on a Samsung tablet. **Team sync** fixes that. Every device writes to one
+**Google Sheet your team owns**, which matches the template's "one shared workbook for the
+whole observation team". The sheet doubles as a live Observation Log.
+
+**Set up once per team** (about 5 minutes, easiest on a computer):
+
+1. Create a Google Sheet, e.g. *K3 Touch Map · team log*.
+2. In it: **Extensions → Apps Script**. Delete what's there and paste
+   [`sync/apps-script.gs`](sync/apps-script.gs). The app's **Copy the script** button
+   copies it for you. Save.
+3. **Deploy → New deployment → Web app**. Set *Execute as: Me* and *Who has access:
+   Anyone*. Deploy, allow the permissions, and copy the Web app URL (it ends in `/exec`).
+4. In Touch Map: **Run → Team sync**, paste the URL and press **Connect**.
+5. Press **Share join link** and send it to every other device. Opening the link asks
+   "Join the team log?". One tap and that device is in.
+
+**How it behaves:**
+
+- **Offline-first.** Logging never waits for the network. Changes queue on the device,
+  and the pill in the app bar shows *Synced*, *n waiting* or *Offline*.
+- **When it syncs:** after each change, when the app comes back to the foreground, when
+  the signal returns, and every 30 seconds while the app is open. Other devices' touches
+  appear within about half a minute.
+- **Edits and deletes travel too.** If two people edit the same touch, the most recent
+  edit wins. Undoing a delete brings the touch back on every device.
+- **The demo run never leaves the device.**
+- **The sheet:**
+  - *Touches* holds the template's columns, sorted by run and time.
+  - *Runs* and *Deleted* are the app's bookkeeping.
+  - Don't edit those three tabs by hand. Build pivots and charts on new tabs.
+- **Access.** Anyone with the Web app URL can read and add touches, like a shared document
+  link, so share it only with the team. For an extra lock, set `TEAM_KEY` in the script and
+  type the same key on each device.
+- **Workspace accounts.** If your Google account is a work (Google Workspace) account,
+  your admin may not allow "Anyone" access. A personal Google account always can.
+
+## Analysis and presenting
+
+The Analysis tab rebuilds the template's Analysis sheet and goes further:
+
+- **Headline:** coverage against the reference frame, mapped vs capacity, and the
+  unexplained gap.
+- **Donuts** for an at-a-glance share: planned vs unplanned, physical vs information, and
+  where the minutes go (the top five categories, plus Other).
+- **Which lever applies:** a 2 × 2 of Planned/Unplanned × Physical/Information. Each
+  quadrant shows its minutes and lever (automate by design, digitalise, fix reliability).
+- **When in the shift:** minutes by start hour, stacked planned/unplanned.
+- **By category:** a Pareto with the top three called out, or P1 → U7 order.
+- **By zone** and **by person**.
+- **Where × why:** a zone × category heatmap.
+- **Types of touch:** a table you can sort by total minutes, by frequency (automation
+  candidates), or by minutes per touch.
+
+**Filters.** A filter bar sets run (this one, another, or all runs), day, observer,
+planned/unplanned, category, zone, touch type and person. **Every chart is also a
+filter:** tap a donut slice, a bar, a quadrant, an hour or a heatmap cell and the whole
+page narrows to it. Each chart keeps showing its own alternatives, with the chosen one
+highlighted, so you can switch quickly. **Present** hides the app chrome, goes full
+screen and enlarges everything for a meeting room screen.
+
+## Getting files out
+
+Files are for the K3 workbook, other tools and off-device backups:
 
 | Export | Use it for |
 |---|---|
 | **Download .xlsx** | Sheets *Observation Log*, *Run Info* and *Analysis*. Log columns A–O match the template exactly, with category names identical to its drop-downs, so rows paste straight into the K3 workbook and its SUMIFs pick them up. Extra columns P–T: person observed, observer, status, logged-at, ID. |
-| **Backup .json** | Merging the team. Each observer exports one; one person imports them all with **Import / merge**. Touches are matched by ID, the newer edit wins, and nothing is deleted. |
+| **Backup .json** | Merging devices without Team sync. Each observer exports one; one person imports them all with **Import / merge**. Touches are matched by ID, the newer edit wins, and nothing is deleted. |
 | **CSV** | Other tools. Prefer .xlsx for Excel, because Excel in a decimal-comma locale misreads CSV numbers. |
 
-On iPad, **Share…** sends a file to AirDrop, Mail, Teams or Files. Export at the end of
-every shift: clearing Safari's website data deletes the touches on that device.
+On iPad, **Share…** sends a file to AirDrop, Mail, Teams or Files.
+
+Without Team sync, export at the end of every shift: clearing the browser's website data
+deletes the touches on that device. With Team sync, the Google Sheet holds the shared copy.
 
 ## Not yet included
 
@@ -94,11 +151,15 @@ No build step and no dependencies: plain HTML, CSS and ES modules.
 
 ```bash
 python3 -m http.server 8080          # from the repo root, then open http://localhost:8080/touchmap/
-cd touchmap && npm test               # model, analysis, decision tree and export tests (Node 18+)
+cd touchmap && npm test               # model, analysis, export and sync-script tests (Node 18+)
+node tests/mock-sync-server.mjs 8790  # local stand-in for the Apps Script; connect to http://127.0.0.1:8790/exec
 ```
 
 | Path | What it holds |
 |---|---|
+| `js/sync.js`, `js/sync-ui.js` | Team sync: change queue and merge, Run card, join link |
+| `sync/apps-script.gs` | The Google Sheets side of Team sync, pasted into Apps Script |
+| `tests/fake-sheets.mjs`, `tests/mock-sync-server.mjs` | Run the real `.gs` against an in-memory sheet, and serve it locally for browser tests |
 | `index.html`, `css/app.css` | Shell and styles |
 | `js/app.js` | Router |
 | `js/capture.js`, `js/form.js` | Stopwatch dock and context form |
@@ -112,5 +173,8 @@ When you change a file, bump `VERSION` in `sw.js`. Installed copies refresh on t
 launch after they've been online.
 
 Brand colours only (Coca-Cola red `#F40009`, white and black); no logos or trademarks.
-Chart colours: Planned `#1E63B8` and Unplanned `#F40009`, checked for colour-blind
-separation.
+Chart colours are checked for colour-blind separation:
+
+- Planned `#1E63B8` and Unplanned `#F40009`;
+- Physical `#6250D6` and Information `#159A6A`;
+- magnitude: a single red ramp.
