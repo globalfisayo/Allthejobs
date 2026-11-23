@@ -1,0 +1,9 @@
+{
+  "name": "touchmap",
+  "private": true,
+  "type": "module",
+  "description": "K3 Touch Map: offline touch-mapping web app (no build step, no dependencies).",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs"
+  }
+}
