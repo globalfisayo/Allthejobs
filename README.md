@@ -6,6 +6,10 @@ taxonomies of work: Canada's **NOC 2021** and the UK's **SOC 2020**.
 
 **Live site:** https://globalfisayo.github.io/Allthejobs/
 
+> Also hosted in this repo: **[Touch Map · K3](touchmap/)**, an offline touch-mapping
+> web app for iPad and phone (stopwatch, K3 category framework, live analysis, Excel export).
+> See [`touchmap/README.md`](touchmap/README.md).
+
 ## What grows here
 
 - **The Garden** — twelve industry beds, each growing one flagship firm-type as a tree:

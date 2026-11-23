@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Touch Map · K3</title>
+<meta name="description" content="Touch mapping on the line: time each touch with a stopwatch, categorise it with the K3 framework, and see the analysis build itself. Works offline on iPad and phone.">
+<meta name="theme-color" content="#F40009">
+<meta name="color-scheme" content="light">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Touch Map">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="format-detection" content="telephone=no">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body data-route="capture">
+<a class="skip" href="#view">Skip to content</a>
+
+<header class="appbar">
+  <a class="brand" href="#capture" aria-label="Touch Map, capture">
+    <svg class="brand-mark" viewBox="0 0 48 48" aria-hidden="true">
+      <rect width="48" height="48" rx="12" fill="#fff"/>
+      <circle cx="24" cy="27" r="13" fill="none" stroke="#F40009" stroke-width="4"/>
+      <path d="M20 8h8M24 8v6M24 27V19.5" stroke="#F40009" stroke-width="4" stroke-linecap="round"/>
+      <circle cx="24" cy="27" r="3.2" fill="#F40009"/>
+    </svg>
+    <span class="brand-text"><strong>Touch Map</strong><span class="brand-run"><span class="live-dot" id="live-dot" hidden title="Stopwatch running"></span><span id="run-name">K3</span></span></span>
+  </a>
+  <nav class="tabs" aria-label="Sections">
+    <a href="#capture" data-route="capture"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 2h6M12 2v3M12 22a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM12 10v4l2.5 2"/></svg><span>Capture</span></a>
+    <a href="#log" data-route="log"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01"/></svg><span>Log</span><span class="badge-count" id="log-count" hidden></span></a>
+    <a href="#analysis" data-route="analysis"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><span>Analysis</span></a>
+    <a href="#run" data-route="run"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4h6a1 1 0 0 1 1 1v1H8V5a1 1 0 0 1 1-1zM8 5H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M8 12h8M8 16h5"/></svg><span>Run</span></a>
+    <a href="#guide" data-route="guide"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2zM4 21V5M19 19v2H6"/></svg><span>Guide</span></a>
+  </nav>
+</header>
+
+<main id="view" tabindex="-1">
+  <noscript><p class="noscript">Touch Map needs JavaScript switched on.</p></noscript>
+</main>
+
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+<dialog id="modal" class="modal"></dialog>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
