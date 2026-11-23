@@ -3,6 +3,7 @@ import { CAT_BY_CODE } from './framework.js';
 import { finalise, missingFields, ordered, totalMinutes, perOccurrence, fmtMin, FIELD_LABEL, blankTouch } from './model.js';
 import { state, save, activeRun, markTouch, removeTouch, restoreTouch } from './store.js';
 import { touchForm } from './form.js';
+import { swipeable } from './swipe.js';
 import { h, clear, icon, toast, openModal, closeModal, fmt } from './ui.js';
 
 const filters = { show: 'all', q: '' };
@@ -34,6 +35,7 @@ export function renderLog(root, { onChange } = {}) {
     h('div', { class: 'filter-row' },
       h('div', { class: 'chips' }, chip('all', 'All'), chip('needs', `Needs details${needs ? ` (${needs})` : ''}`), chip('Planned', 'Planned'), chip('Unplanned', 'Unplanned')),
       search),
+    all.length && window.matchMedia('(pointer: coarse)').matches ? h('p', { class: 'muted small swipe-hint' }, icon('hand'), 'Swipe a touch left to delete it, right to edit it.') : null,
     listEl));
 
   function paintList() {
@@ -70,7 +72,8 @@ export function renderLog(root, { onChange } = {}) {
     const cat = CAT_BY_CODE[t.category];
     const per = perOccurrence(t);
     const total = totalMinutes(t);
-    return h('button', { type: 'button', class: 'entry' + (t.incomplete ? ' incomplete' : ''), onclick: () => openEditor(t.id, () => { onChange?.(); renderLog(root, { onChange }); }) },
+    const refresh = () => { onChange?.(); renderLog(root, { onChange }); };
+    const row = h('button', { type: 'button', class: 'entry' + (t.incomplete ? ' incomplete' : ''), onclick: () => openEditor(t.id, refresh) },
       h('span', { class: 'entry-num' }, h('strong', { text: `#${num}` }), h('span', { text: fmt.time(t.start || t.createdAt) })),
       h('span', { class: 'entry-main' },
         h('span', { class: 'entry-title' },
@@ -82,9 +85,22 @@ export function renderLog(root, { onChange } = {}) {
       h('span', { class: 'entry-dur' },
         h('strong', { text: fmtMin(total) }), h('span', { text: ' min' }),
         h('small', { text: per == null ? `${t.count} counted` : `${t.count} × ${fmtMin(per)}` })));
+    return swipeable(row, {
+      onLeft: () => deleteWithUndo(activeRun(), t.id, num, refresh),
+      onRight: () => openEditor(t.id, refresh),
+    });
   }
 
   paintList();
+}
+
+/** Delete a touch, with Undo in the toast (the delete also reaches other devices via sync). */
+export function deleteWithUndo(run, id, num, onDone) {
+  const gone = removeTouch(run, id);
+  if (!gone) return;
+  save();
+  toast(`Touch #${num} deleted.`, { action: { label: 'Undo', fn: () => { restoreTouch(run, gone); save(); onDone?.(); } }, timeout: 7000 });
+  onDone?.();
 }
 
 /** Edit one logged touch in a dialog, with the same form as capture. */
@@ -112,13 +128,7 @@ export function openEditor(id, onDone) {
     toast(miss.length ? `Touch #${num} saved. Still needs ${miss.map(m => FIELD_LABEL[m]).join(', ')}.` : `Touch #${num} updated.`);
     onDone?.();
   };
-  const doDelete = () => {
-    const gone = removeTouch(run, id);
-    if (!gone) return;
-    save(); closeModal();
-    toast(`Touch #${num} deleted.`, { action: { label: 'Undo', fn: () => { restoreTouch(run, gone); save(); onDone?.(); } }, timeout: 7000 });
-    onDone?.();
-  };
+  const doDelete = () => { closeModal(); deleteWithUndo(run, id, num, onDone); };
   const doRepeat = () => {
     Object.assign(state.draft, blankTouch({ zone: model.zone, who: model.who }), {
       id: state.draft.id, planned: model.planned, category: model.category, type: model.type, touchType: model.touchType,
