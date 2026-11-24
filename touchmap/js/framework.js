@@ -1,6 +1,28 @@
 // Guidance layer over the framework data: the category decision order, the counting
 // rules and the reading notes, all worded as in the template's 'How to use' sheet.
 import { FRAMEWORK } from './framework-data.js';
+import { ZONE_INFO, ON_EVERY_MACHINE } from './zonemap.js';
+
+// Default placement on the line: each type gets the zones it happens at, or `everywhere`.
+const PLACEMENT = new Map();
+for (const [zone, z] of Object.entries(ZONE_INFO)) for (const [code, name] of z.types) {
+  const k = code + '|' + name;
+  PLACEMENT.set(k, { zones: [...(PLACEMENT.get(k)?.zones || []), zone], everywhere: false });
+}
+for (const [code, name] of ON_EVERY_MACHINE) {
+  const k = code + '|' + name;
+  PLACEMENT.set(k, { zones: PLACEMENT.get(k)?.zones || [], everywhere: true });
+}
+function place(cats) {
+  for (const c of cats) for (const t of c.types) {
+    if (Array.isArray(t.zones) && t.everywhere !== undefined) continue;
+    const p = PLACEMENT.get(c.code + '|' + t.name);
+    if (!Array.isArray(t.zones)) t.zones = p ? [...p.zones] : [];
+    if (t.everywhere === undefined) t.everywhere = !!p?.everywhere;
+  }
+  return cats;
+}
+place(FRAMEWORK.categories);
 
 export { FRAMEWORK };
 
@@ -126,7 +148,7 @@ export function sortCategories(list) {
 /** Use a customised framework (from Setup), or the default when given nothing. */
 export function applyFramework(custom) {
   const cats = Array.isArray(custom?.categories) && custom.categories.length ? custom.categories : DEFAULT_CATEGORIES;
-  CATEGORIES.splice(0, CATEGORIES.length, ...sortCategories(JSON.parse(JSON.stringify(cats))));
+  CATEGORIES.splice(0, CATEGORIES.length, ...sortCategories(place(JSON.parse(JSON.stringify(cats)))));
   for (const k of Object.keys(CAT_BY_CODE)) delete CAT_BY_CODE[k];
   for (const c of CATEGORIES) {
     c.short = c.short || String(c.name).split(': ').slice(1).join(': ') || c.name;
@@ -144,4 +166,4 @@ export function nextCategoryCode(planned) {
 
 /** Is the framework in use different from the shipped default? */
 export const isCustomFramework = () => JSON.stringify(CATEGORIES.map(strip)) !== JSON.stringify(sortCategories(JSON.parse(JSON.stringify(DEFAULT_CATEGORIES))).map(strip));
-function strip(c) { return { code: c.code, name: c.name, planned: c.planned, hidden: !!c.hidden, types: c.types.map(t => ({ n: t.name, tt: t.touchType, g: t.guide, h: !!t.hidden, z: t.zones || [] })) }; }
+function strip(c) { return { code: c.code, name: c.name, planned: c.planned, hidden: !!c.hidden, types: c.types.map(t => ({ n: t.name, tt: t.touchType, g: t.guide, h: !!t.hidden, z: [...(t.zones || [])].sort(), e: !!t.everywhere })) }; }

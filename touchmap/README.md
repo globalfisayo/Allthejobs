@@ -131,15 +131,50 @@ operators × observed hours, less the same share of breaks as a full shift.
 
   Added types appear on Capture and on the Guide map.
 - **Zones / areas** and **People & roles.** Add a newly installed area here.
+- **Colours.** Planned, Unplanned, Physical, Information, and an optional colour per
+  equipment zone. Badges, buttons, charts and the Guide diagram follow straight away, and
+  badge text switches between white and black to stay readable.
 - **Team sync** (below), and **This device**: your observer name, the demo run, and
   export/import of the setup as a file.
 
 The defaults are exactly the template's framework. With Team sync, Setup changes reach
-every device. That needs the **updated sync script** (version 2). If your sheet runs the
+every device: touch types, zones, people, colours, the line diagram, chart types and chart
+notes. They
+need the **updated sync script** (version 2). If your sheet runs the
 first version, paste the new `sync/apps-script.gs` into Apps Script, then **Deploy →
 Manage deployments → Edit → Version: New version → Deploy**. The web app URL stays the
 same. Until then, Setup changes stay on the device where they were made, and **Export
 setup / Import setup** moves them by file.
+
+## The line diagram (Guide → Edit diagram)
+
+The Guide's line map is an editable drawing, so it can follow changes on the line.
+
+- **Shapes:** rectangles (with rounded corners), circles and ellipses, triangles, diamonds
+  and hoppers.
+- **Text:** a text tool, and text inside any shape (double-tap it).
+- **Lines and arrows:**
+  - they **snap to the four dots on a shape and follow it** when it moves;
+  - straight or elbow;
+  - solid, dashed or dotted;
+  - arrowheads at either or both ends.
+- **Images and icons:** upload or paste images (resized to at most 1200 px); icons from the
+  app's set.
+- **Styling:** colours for fill, line and text, thickness, opacity, front/back, duplicate,
+  align several shapes.
+- **Editing:** snap to grid and to other shapes' edges and centres; undo/redo (Ctrl/Cmd+Z);
+  pan with the hand tool or two fingers; zoom with a pinch, Ctrl+scroll or the buttons.
+  Keyboard shortcuts: V select, R rectangle, O ellipse, T text, L line, A arrow, Delete,
+  Ctrl/Cmd+D duplicate.
+- **Zone link:** link a shape to a zone and tapping it in the Guide opens that zone's
+  touches. *This run* shades linked shapes by minutes logged.
+- **Export:** PNG or SVG.
+- **Reset:** returns to the default K3 line.
+
+The Guide always follows the touch types. Each type carries the zones where it happens
+(and whether it can happen on any machine), so a type added, renamed or hidden in Setup
+shows up, moves or disappears on the map straight away. Set a type's zones in
+Setup → Touch types → edit a type.
 
 ## Analysis and presenting
 
@@ -162,6 +197,29 @@ The Analysis tab rebuilds the template's Analysis sheet and goes further:
 together** on the Runs tab does the same. With more than one run, a *Runs compared* card
 shows each run's planned/unplanned minutes and coverage side by side, for observations
 done on different days.
+
+**Chart types.** Every chart has a small switch to change how it is drawn:
+
+| Chart | Options |
+|---|---|
+| Planned vs unplanned, Physical vs information | Donut, bars, columns, table |
+| Where the minutes go, By category, By zone | Bars, columns, **Pareto**, donut, table |
+| When in the shift | Stacked columns, **columns + line**, lines, table |
+| Runs compared | Bars, columns, lines, table |
+| Types of touch | Sortable table, bars, Pareto |
+
+The chosen type is remembered for the team.
+
+**Pareto, an exception to "one axis".** It is the one chart with two scales. Minutes show
+as columns on the left axis. The running share shows as a line on its own clearly
+labelled 0–100% axis on the right, with an 80% mark. That's the standard Lean Pareto,
+used to pick the few categories that make the most minutes. Every other combined chart
+uses a single unit.
+
+**Notes on charts.** The ✎ on a chart adds text, arrows, lines, shapes, icons, and images
+you upload or paste, drawn over the chart. Notes are positioned relative to the chart, so
+they stay in place on a phone or a projector. They print with the page and are shared with
+the team.
 
 **Filters.** A filter bar sets day, observer,
 planned/unplanned, category, zone, touch type and person. **Every chart is also a
@@ -211,9 +269,10 @@ Two adjustments were made to the source:
 - *Line speed & packer* had no guide text in the sheet, so it shares the next row's
   guide (speed and packer settings).
 
-Which touches happen at which zone (`js/linemap.js`) is authored from the guide texts,
-because the framework itself doesn't say. Edit `ZONE_INFO` to match the line. A test
-fails if any of the 74 types is left off the map or misspelled.
+Which touches happen at which zone is authored from the guide texts, because the framework
+itself doesn't say. The default is in `js/zonemap.js`, and each type carries its zones from
+there. Change them in Setup without code. A test fails if any of the 74 types is left
+unplaced or misspelled.
 
 ## Development
 
@@ -230,7 +289,11 @@ node tests/mock-sync-server.mjs 8790  # local stand-in for the Apps Script; conn
 | `js/stopwatch.js`, `js/minibar.js` | One shared stopwatch; the bar on every screen |
 | `js/runs.js`, `js/report.js` | Runs history and details; the summary report |
 | `js/setup.js` | Setup: touch framework editor, zones, people, sync, device |
-| `js/linemap.js` | The line drawing and its zone-to-touch mapping, covering all 74 types |
+| `js/linemap.js`, `js/zonemap.js` | The Guide map card and zone popups; the default zone for each of the 74 types |
+| `js/board.js` | The whiteboard: shapes, connectors, snapping, images, undo/redo, export |
+| `js/diagram.js` | The default K3 line as shapes, and the diagram editor page |
+| `js/charts.js`, `js/annotate.js` | Chart renderers behind the type switch; notes drawn over charts |
+| `js/colors.js` | Team colours applied as CSS variables |
 | `js/swipe.js` | Swipe left/right on log rows |
 | `js/sync.js`, `js/sync-ui.js` | Team sync: change queue and merge, Run card, join link |
 | `sync/apps-script.gs` | The Google Sheets side of Team sync, pasted into Apps Script |

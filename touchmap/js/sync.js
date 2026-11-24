@@ -2,6 +2,7 @@
 // Every change is queued on the device first, so logging never waits for the network;
 // a sync sends the queue and brings back what the other devices changed since last time.
 import { DEFAULT_INFO, applyFramework } from './framework.js';
+import { applyColors } from './colors.js';
 import { state, save, hooks, markEverything, pendingCount, ensureRun } from './store.js';
 import { syncCells, runCells, cleanTouch, cleanInfo } from './export.js';
 
@@ -89,7 +90,7 @@ function buildBody() {
   }
   const tombstones = [...s.tombstones];
   const settings = s.dirtySetup && state.setupUpdatedAt
-    ? { updatedAt: state.setupUpdatedAt, data: { framework: state.framework, lists: state.lists } } : undefined;
+    ? { updatedAt: state.setupUpdatedAt, data: { framework: state.framework, lists: state.lists, colors: state.colors, diagram: state.diagram, annotations: state.annotations, chartKinds: state.chartKinds } } : undefined;
   return { body: { app: 'touchmap', v: 2, key: s.key || undefined, since: s.since || 0, runs, touches, tombstones, settings }, sentT, sentR, tombstones, sentSetupAt: settings?.updatedAt };
 }
 
@@ -103,9 +104,14 @@ export function applyRemote(data, { firstSync = false } = {}) {
     if (d.lists && Array.isArray(d.lists.zones) && Array.isArray(d.lists.people)) {
       state.lists = { zones: d.lists.zones.filter(x => typeof x === 'string').slice(0, 200), people: d.lists.people.filter(x => typeof x === 'string').slice(0, 200) };
     }
+    if ('colors' in d) state.colors = d.colors && typeof d.colors === 'object' ? d.colors : null;
+    if ('diagram' in d) state.diagram = d.diagram && Array.isArray(d.diagram.shapes) ? d.diagram : null;
+    if ('annotations' in d) state.annotations = d.annotations && typeof d.annotations === 'object' ? d.annotations : {};
+    if ('chartKinds' in d) state.chartKinds = d.chartKinds && typeof d.chartKinds === 'object' ? d.chartKinds : {};
     state.setupUpdatedAt = data.settings.updatedAt;
     s.dirtySetup = false;
     applyFramework(state.framework);
+    applyColors(state.colors);
     changed = true;
   }
   const serverRunIds = new Set((data.runs || []).map(r => r.id));

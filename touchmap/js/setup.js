@@ -6,6 +6,7 @@ import { demoTouches } from './demo.js';
 import { syncCard } from './sync-ui.js';
 import { ZONE_KEYS } from './linemap.js';
 import { h, clear, icon, toast, openModal, closeModal, confirmBox, deliverFile, pickFile, fmt, stamp, group } from './ui.js';
+import { DEFAULT_COLORS, SWATCHES, applyColors, resolveColors, textOn } from './colors.js';
 
 /** Change the framework in use, save it as the team's custom framework, and share it. */
 function editFramework(mutate) {
@@ -25,13 +26,14 @@ function usage(code, typeName) {
 
 function typeEditor(code, existing, rerender) {
   const cat = CAT_BY_CODE[code];
-  const model = existing ? { ...existing, zones: [...(existing.zones || [])] } : { name: '', touchType: 'Physical', guide: '', zones: [], hidden: false, custom: true };
+  const model = existing ? { ...existing, zones: [...(existing.zones || [])] } : { name: '', touchType: 'Physical', guide: '', zones: [], everywhere: false, hidden: false, custom: true };
   const name = h('input', { type: 'text', value: model.name, id: 'te-name', autocomplete: 'off', placeholder: 'e.g. Robot gripper change' });
   const guide = h('textarea', { rows: '4', id: 'te-guide', placeholder: 'How to count it: what is 1 touch, what belongs in another category.' });
   guide.value = model.guide || '';
   const ttSeg = h('div', { class: 'seg' });
   const zonesBox = h('div', { class: 'chips' });
   const hidden = h('input', { type: 'checkbox', checked: !!model.hidden, id: 'te-hidden' });
+  const everywhere = h('input', { type: 'checkbox', checked: !!model.everywhere, id: 'te-every' });
   const paint = () => {
     clear(ttSeg, TOUCH_TYPES.map(v => h('button', { type: 'button', class: 'seg-btn' + (model.touchType === v ? ' on' : ''), 'aria-pressed': String(model.touchType === v), onclick: () => { model.touchType = v; paint(); } },
       h('span', { class: 'seg-main' }, icon(v === 'Physical' ? 'hand' : 'edit'), ' ', v))));
@@ -48,8 +50,7 @@ function typeEditor(code, existing, rerender) {
     const oldName = existing?.name;
     editFramework(cats => {
       const c = cats.find(x => x.code === code);
-      const next = { ...model, name: n, guide: guide.value.trim(), hidden: hidden.checked };
-      if (!next.zones.length) delete next.zones;
+      const next = { ...model, name: n, guide: guide.value.trim(), hidden: hidden.checked, everywhere: everywhere.checked };
       if (existing) c.types[c.types.findIndex(t => t.name === oldName)] = next;
       else c.types.push(next);
     });
@@ -78,6 +79,7 @@ function typeEditor(code, existing, rerender) {
     h('div', { class: 'f' }, h('span', { class: 'f-label', text: 'Touch type' }), ttSeg),
     h('label', { class: 'f', for: 'te-guide' }, h('span', { class: 'f-label', text: 'How to count' }), guide),
     h('div', { class: 'f' }, h('span', { class: 'f-label' }, icon('pin'), ' Where it happens (shown on the Guide map)'), zonesBox),
+    h('label', { class: 'check-row', for: 'te-every' }, everywhere, icon('grid'), 'Can happen on any machine'),
     h('label', { class: 'check-row', for: 'te-hidden' }, hidden, icon('eyeOff'), 'Hide from Capture (logged touches keep it)'),
     used ? h('p', { class: 'muted small' }, icon('info'), ` ${used} logged ${used === 1 ? 'touch uses' : 'touches use'} this type; renaming updates them.`) : null,
     h('div', { class: 'row-end' },
@@ -202,6 +204,30 @@ export function renderSetup(root, { onChange } = {}) {
     onChange?.();
   }
 
+  /* ---------- colours ---------- */
+  const setColour = (key, value, zone) => {
+    const c = resolveColors(state.colors);
+    if (zone) { if (value) c.zones[zone] = value; else delete c.zones[zone]; } else c[key] = value;
+    state.colors = c; applyColors(c); markSetup();
+  };
+  const colourRow = (label, key, zone) => {
+    const cur = zone ? (resolveColors(state.colors).zones[zone] || '') : resolveColors(state.colors)[key];
+    const input = h('input', { type: 'color', value: cur || '#cccccc', 'aria-label': `${label} colour` });
+    const preview = h('span', { class: 'col-preview', style: { background: cur || 'transparent', color: cur ? textOn(cur) : 'var(--ink-3)' }, text: cur ? (zone ? '' : (key === 'planned' ? 'P1' : key === 'unplanned' ? 'U1' : 'Aa')) : 'none' });
+    const paint = (v) => { preview.style.background = v || 'transparent'; preview.style.color = v ? textOn(v) : 'var(--ink-3)'; if (zone) preview.textContent = v ? '' : 'none'; };
+    input.addEventListener('input', () => { paint(input.value); setColour(key, input.value, zone); });
+    return h('div', { class: 'col-row' },
+      preview,
+      h('span', { class: 'col-label', text: label }),
+      h('div', { class: 'col-swatches' }, SWATCHES.slice(0, zone ? 8 : 12).map(sw => h('button', {
+        type: 'button', class: 'sw-dot' + (sw.toLowerCase() === String(cur).toLowerCase() ? ' on' : ''), style: { background: sw }, 'aria-label': `Use ${sw}`,
+        onclick: () => { input.value = sw; paint(sw); setColour(key, sw, zone); rerender(); },
+      }))),
+      h('label', { class: 'col-custom', title: 'Any colour' }, icon('sliders'), input),
+      zone && cur ? h('button', { type: 'button', class: 'icon-btn small', 'aria-label': `Clear ${label} colour`, onclick: () => { setColour(key, '', zone); rerender(); } }, icon('close')) : null);
+  };
+  const customColours = JSON.stringify(resolveColors(state.colors)) !== JSON.stringify(resolveColors(null));
+
   const oldScript = state.sync.url && state.sync.serverV === 1;
 
   clear(root, h('section', { class: 'setupv' },
@@ -215,6 +241,15 @@ export function renderSetup(root, { onChange } = {}) {
         custom ? h('button', { type: 'button', class: 'btn ghost small', onclick: resetFramework }, icon('reset'), 'Reset to default') : null),
       oldScript && state.sync.dirtySetup ? h('p', { class: 'warn-line' }, icon('warn'), 'Your sync script is the older version, so these changes stay on this device. In Apps Script, paste the new script and deploy a new version.') : null,
       h('div', { class: 'fw-grid' }, catBlock(true), catBlock(false))),
+
+    group('setup-colours', 'Colours', 'sliders', { badge: customColours ? 'customised' : 'default' },
+      h('div', { class: 'col-list' },
+        colourRow('Planned', 'planned'), colourRow('Unplanned', 'unplanned'),
+        colourRow('Physical', 'physical'), colourRow('Information', 'information')),
+      h('h3', { class: 'fw-h' }, icon('pin'), ' Equipment / zones'),
+      h('p', { class: 'muted small', text: 'Optional: colours the zone bars in Analysis and the zones on the Guide diagram.' }),
+      h('div', { class: 'col-list' }, state.lists.zones.map(z => colourRow(z, null, z))),
+      customColours ? h('button', { type: 'button', class: 'btn ghost small', onclick: () => { state.colors = null; applyColors(null); markSetup(); rerender(); } }, icon('reset'), 'Default colours') : null),
 
     group('setup-zones', 'Zones / areas', 'pin', { badge: state.lists.zones.length },
       h('p', { class: 'muted small', text: 'Add a newly installed area here; it appears on Capture and under the Guide map.' }),

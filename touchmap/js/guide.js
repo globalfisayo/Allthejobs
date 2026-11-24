@@ -54,6 +54,9 @@ export function renderGuide(root) {
             h('span', { text: n.text }),
             to ? h('span', { class: 'code ' + (to.startsWith('U') ? 'code-u' : to.startsWith('P') ? 'code-p' : 'code-x'), text: to }) : null);
         })),
+        CATEGORIES.some(c => c.custom && !c.hidden) ? h('div', { class: 'added-cats' },
+          h('p', { class: 'muted small' }, icon('plus'), ' Added in Setup (not in the questions; pick them directly):'),
+          h('ul', {}, CATEGORIES.filter(c => c.custom && !c.hidden).map(c => h('li', {}, h('span', { class: 'code ' + (c.planned ? 'code-p' : 'code-u'), text: c.code }), ' ', c.short, c.rule ? h('span', { class: 'muted', text: ` · ${c.rule}` }) : null)))) : null,
         h('p', { class: 'warn-line' }, icon('info'), OTHER_ADVICE),
         h('p', { class: 'muted', text: PARETO_NOTE })),
 

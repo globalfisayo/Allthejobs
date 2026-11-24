@@ -26,7 +26,7 @@ function append(el, kids) {
 export function clear(el, ...kids) { el.replaceChildren(); append(el, kids); return el; }
 
 const SVGNS = 'http://www.w3.org/2000/svg';
-const PATHS = {
+export const PATHS = {
   timer: 'M9 2h6M12 2v3M5.6 7.6l-1.4-1.4M12 22a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM12 10v4l2.5 2',
   list: 'M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01',
   chart: 'M4 20V10M10 20V4M16 20v-7M22 20H2',

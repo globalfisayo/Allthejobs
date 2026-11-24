@@ -7,6 +7,7 @@ import { renderRuns } from './runs.js';
 import { renderReport } from './report.js';
 import { renderGuide } from './guide.js';
 import { renderSetup } from './setup.js';
+import { renderDiagramEditor } from './diagram.js';
 import { closeModal } from './ui.js';
 import { startSync, onSync } from './sync.js';
 import { paintSyncPill, handleJoin } from './sync-ui.js';
@@ -22,9 +23,10 @@ const ROUTES = {
   report: (el) => renderReport(el),
   guide: (el) => renderGuide(el),
   setup: (el) => renderSetup(el, { onChange: paintChrome }),
+  diagram: (el) => renderDiagramEditor(el),
 };
 // Tabs a route belongs under, for the highlight.
-const TAB_OF = { report: 'run' };
+const TAB_OF = { report: 'run', diagram: 'guide' };
 
 const view = document.getElementById('view');
 let cleanup = null;
@@ -81,7 +83,7 @@ onSync((changed) => {
   const r = current();
   const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || '');
   const modal = document.getElementById('modal').open;
-  if (r === 'log' || r === 'analysis' || r === 'report' || ((r === 'run' || r === 'setup') && !typing && !modal)) renderRoute({ keepScroll: true });
+  if (r === 'log' || r === 'analysis' || r === 'report' || ((r === 'run' || r === 'setup' || r === 'guide') && !typing && !modal)) renderRoute({ keepScroll: true });
 });
 
 // Saving or undoing from the stopwatch bar changes the log and the counts.

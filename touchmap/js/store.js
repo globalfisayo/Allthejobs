@@ -1,6 +1,7 @@
 // Everything lives in this browser's localStorage, one key, saved on every change.
 // With Team sync on, changed touches and runs are also queued for the team's Google Sheet.
 import { FRAMEWORK, DEFAULT_INFO, applyFramework } from './framework.js';
+import { applyColors } from './colors.js';
 import { blankTouch, uid } from './model.js';
 
 const KEY = 'touchmap:v1';
@@ -62,7 +63,12 @@ function load() {
 export const state = load() || fresh();
 state.framework ??= null;
 state.setupUpdatedAt ??= null;
+state.colors ??= null;       // null = the default colours
+state.diagram ??= null;      // null = the default Guide diagram
+state.annotations ??= {};    // chart id → annotation shapes
+state.chartKinds ??= {};     // chart id → chosen chart type
 applyFramework(state.framework);
+applyColors(state.colors);
 
 /** The touch framework or the lists changed in Setup: save, and share with the team. */
 export function markSetup() {
