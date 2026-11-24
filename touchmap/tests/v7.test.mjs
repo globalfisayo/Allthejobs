@@ -49,3 +49,17 @@ test('business units: Romania live, three next in line, the rest listed; ids uni
   assert.deepEqual(ORG.units.filter(u => u.featured).map(u => u.name), ['Bulgaria', 'Hungary', 'Serbia']);
   assert.ok(ORG.units.length >= 20);
 });
+
+test('who may change a touch: its own device, or an admin', async () => {
+  const mem = new Map();
+  globalThis.localStorage = { getItem: (k) => (mem.has(k) ? mem.get(k) : null), setItem: (k, v) => mem.set(k, String(v)), removeItem: (k) => mem.delete(k) };
+  const { state, canEditTouch } = await import('../js/store.js');
+  state.profile = { name: 'Ana Pop', at: 'x' };
+  assert.equal(canEditTouch({ device: state.deviceId }), true, 'logged here');
+  assert.equal(canEditTouch({ device: 'another-tablet', observer: 'Ana Pop' }), false, 'logged on another device, even with the same name');
+  assert.equal(canEditTouch({ observer: 'Ana Pop' }), true, 'older touch without a device: same observer name');
+  assert.equal(canEditTouch({ observer: 'Someone else' }), false);
+  mem.set('touchmap:session', JSON.stringify({ role: 'admin', at: Date.now() }));
+  assert.equal(canEditTouch({ device: 'another-tablet' }), true, 'an admin may change any touch');
+  delete globalThis.localStorage;
+});

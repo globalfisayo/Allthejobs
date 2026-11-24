@@ -41,7 +41,7 @@ export const ROWS = [
   [705, 'Control room / office', 'P8', 'System bookings & traceability', 3, 4, 'Op 4', 'Books finished pallets and material lots in SAP'],
 ];
 
-export function demoTouches(shiftStart = (() => { const d = new Date(); d.setHours(6, 0, 0, 0); if (d > new Date()) d.setDate(d.getDate() - 1); return d; })()) {
+export function demoTouches(shiftStart = (() => { const d = new Date(); d.setHours(6, 0, 0, 0); if (d > new Date()) d.setDate(d.getDate() - 1); return d; })(), deviceId = '') {
   return ROWS.map(([offset, zone, category, type, count, per, who, description]) => {
     const start = new Date(shiftStart.getTime() + offset * 60000);
     const info = typeInfo(category, type);
@@ -52,7 +52,7 @@ export function demoTouches(shiftStart = (() => { const d = new Date(); d.setHou
       planned: category.startsWith('P') ? 'Planned' : 'Unplanned',
       count, countMode: 'all', timedSec: timed, durManual: false,
       start: start.toISOString(), end: new Date(start.getTime() + timed * 1000).toISOString(),
-      description: 'Demo · ' + description, observer: 'Demo',
+      description: 'Demo · ' + description, observer: 'Demo', ...(deviceId ? { device: deviceId } : {}),
     };
     return finalise(t, { now: start });
   });

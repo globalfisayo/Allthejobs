@@ -224,7 +224,7 @@ export function renderSetup(root, { onChange } = {}) {
   function loadDemo() {
     const cur = state.runs[state.activeRunId];
     const r = createRun('Demo shift (sample data)', { ...cur.info, skus: 'Demo: 2 L to 0.5 L', changeovers: '1', cips: '1', observers: 'Demo', operatorNames: ['Ana', 'Mihai', 'Elena', 'Radu'] }, { localOnly: true });
-    r.touches = demoTouches(); save();
+    r.touches = demoTouches(undefined, state.deviceId); save();
     toast('Demo run loaded, on this device only.', { action: { label: 'Analysis', fn: () => { location.hash = '#analysis'; } } });
     onChange?.();
   }
@@ -254,6 +254,7 @@ export function renderSetup(root, { onChange } = {}) {
   const customColours = JSON.stringify(resolveColors(state.colors)) !== JSON.stringify(resolveColors(null));
 
   const oldScript = state.sync.url && state.sync.serverV === 1;
+  const admin = session()?.role === 'admin';
 
   clear(root, h('section', { class: 'setupv' },
     h('div', { class: 'view-head' }, h('div', {},
@@ -262,14 +263,19 @@ export function renderSetup(root, { onChange } = {}) {
 
     profileGroup(),
 
-    group('setup-touches', 'Touch types', 'layers', { open: true, badge: custom ? 'customised' : 'default' },
+    // the touch framework, colours, zones and people are the team's: an admin changes them
+    !admin ? h('div', { class: 'card admin-only' }, h('span', { class: 'pf-ico' }, icon('lock')),
+      h('div', {}, h('strong', { text: 'Touch types, colours, zones and people are set by your admin.' }),
+        h('p', { class: 'muted small', text: 'You can log touches, edit or delete the ones you logged, and see everyone’s. Ask an admin to add a touch type or an area.' }))) : null,
+
+    !admin ? null : group('setup-touches', 'Touch types', 'layers', { open: true, badge: custom ? 'customised' : 'default' },
       h('div', { class: 'row-gap fw-status' },
         h('span', { class: 'pill ' + (custom ? 'new' : 'ok') }, icon(custom ? 'edit' : 'check'), custom ? `Customised ${state.setupUpdatedAt ? fmt.ago(state.setupUpdatedAt) : ''}` : 'Default (the K3 template)'),
         custom ? h('button', { type: 'button', class: 'btn ghost small', onclick: resetFramework }, icon('reset'), 'Reset to default') : null),
       oldScript && state.sync.dirtySetup ? h('p', { class: 'warn-line' }, icon('warn'), 'Your sync script is the older version, so these changes stay on this device. In Apps Script, paste the new script and deploy a new version.') : null,
       h('div', { class: 'fw-grid' }, catBlock(true), catBlock(false))),
 
-    group('setup-colours', 'Colours', 'sliders', { badge: customColours ? 'customised' : 'default' },
+    !admin ? null : group('setup-colours', 'Colours', 'sliders', { badge: customColours ? 'customised' : 'default' },
       h('div', { class: 'col-list' },
         colourRow('Planned', 'planned'), colourRow('Unplanned', 'unplanned'),
         colourRow('Physical', 'physical'), colourRow('Information', 'information')),
@@ -278,11 +284,11 @@ export function renderSetup(root, { onChange } = {}) {
       h('div', { class: 'col-list' }, state.lists.zones.map(z => colourRow(z, null, z))),
       customColours ? h('button', { type: 'button', class: 'btn ghost small', onclick: () => { state.colors = null; applyColors(null); markSetup(); rerender(); } }, icon('reset'), 'Default colours') : null),
 
-    group('setup-zones', 'Zones / areas', 'pin', { badge: state.lists.zones.length },
+    !admin ? null : group('setup-zones', 'Zones / areas', 'pin', { badge: state.lists.zones.length },
       h('p', { class: 'muted small', text: 'Add a newly installed area here; it appears on Capture and under the Guide map.' }),
       chipList('zones', 'zones', 'New zone, e.g. Robot palletiser')),
 
-    group('setup-people', 'People & roles', 'users', { badge: state.lists.people.length },
+    !admin ? null : group('setup-people', 'People & roles', 'users', { badge: state.lists.people.length },
       h('p', { class: 'muted small', text: 'Roles offered on Capture. Operator names are added per run, in Runs.' }),
       chipList('people', 'people', 'New role, e.g. Line technician')),
 
@@ -293,7 +299,7 @@ export function renderSetup(root, { onChange } = {}) {
       h('div', { class: 'row-gap' },
         h('button', { type: 'button', class: 'btn ghost', onclick: loadDemo }, icon('chart'), 'Load a demo run'),
         h('button', { type: 'button', class: 'btn ghost', onclick: exportSetup }, icon('download'), 'Export setup'),
-        h('button', { type: 'button', class: 'btn ghost', onclick: importSetup }, icon('upload'), 'Import setup')),
+        admin ? h('button', { type: 'button', class: 'btn ghost', onclick: importSetup }, icon('upload'), 'Import setup') : null),
       h('p', { class: 'muted small', text: 'The demo run stays on this device and never reaches the team sheet.' }))));
 }
 

@@ -77,7 +77,7 @@ export function analyse(touches, info, lists = {}, { capacity: capOverride = nul
       plannedHours: plannedMin / 60, unplannedHours: unplannedMin / 60,
     },
     byPlanned, byCategory, catPareto, top3, top3Share,
-    byTouchType, byZone, byRoute, byPerson,
+    byTouchType, byZone, byRoute, byPerson, byType,
     topTypes: pareto(byType.items).slice(0, 10),
   };
 }

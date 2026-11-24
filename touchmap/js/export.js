@@ -160,6 +160,7 @@ export function cleanTouch(t) {
     timedSec: num(t.timedSec), start: str(t.start) || null, end: str(t.end) || null, description: str(t.description),
     route: str(t.route) || 'To be decided', observer: str(t.observer), createdAt: str(t.createdAt) || null,
     updatedAt: str(t.updatedAt) || null, incomplete: !!t.incomplete,
+    ...(t.device ? { device: str(t.device).slice(0, 60) } : {}),
   };
 }
 

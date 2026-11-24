@@ -1,7 +1,7 @@
 // Runs: every observation, kept. History cards to open, compare or report; the details of
 // one run in collapsible groups (info, operators, observation time, reference frame, export).
 import { referenceCapacity, runCapacity, observedMinutes, observedSpans, totalMinutes, mergeTouches } from './model.js';
-import { state, save, activeRun, runsList, createRun, deleteRun, nextRunName, storageHealthy, markRun, markTouch } from './store.js';
+import { state, save, activeRun, runsList, createRun, deleteRun, nextRunName, storageHealthy, markRun, markTouch, canEditTouch } from './store.js';
 import { buildWorkbook, buildCsv, buildBackup, parseBackup } from './export.js';
 import { h, clear, icon, toast, deliverFile, pickFile, canShareFiles, confirmBox, openModal, closeModal, fmt, stamp, slug, group, fmtDuration } from './ui.js';
 import { analyseRuns } from './insights.js';
@@ -309,7 +309,9 @@ export function renderRuns(root, { onChange } = {}) {
 
     group('run-manage', 'Delete this run', 'trash', {},
       h('p', { class: 'muted small', text: 'Removes the run and its touches. Other runs are not affected.' }),
-      h('button', { type: 'button', class: 'btn danger-ghost', onclick: removeRun }, icon('trash'), `Delete “${run.name}”`)));
+      // a run holding anyone else's touches is deleted only by an admin
+      run.touches.every(canEditTouch) ? h('button', { type: 'button', class: 'btn danger-ghost', onclick: removeRun }, icon('trash'), `Delete “${run.name}”`)
+        : h('p', { class: 'lock-note' }, icon('lock'), ' This run holds touches logged on other devices: only an admin can delete it.')));
 
   clear(root, h('section', { class: 'runsv' }, history, details));
   paintOps(); paintTime(); paintFrame();
