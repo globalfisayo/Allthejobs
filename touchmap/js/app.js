@@ -18,6 +18,8 @@ import { paintSyncPill, handleJoin } from './sync-ui.js';
 import { onWatch } from './stopwatch.js';
 import { initMinibar, showMinibar } from './minibar.js';
 import { paintAvatar } from './usermenu.js';
+import { initTabs } from './tabs.js';
+import { setPassive } from './store.js';
 
 // Each view renders into the main element; one that keeps timers or listeners returns a cleanup.
 const ROUTES = {
@@ -127,7 +129,9 @@ onWatch((evt) => {
 });
 
 window.addEventListener('hashchange', route);
-window.addEventListener('storage', (e) => { if (e.key === 'touchmap:v1' || e.key === 'touchmap:session') location.reload(); });
+// Another copy of the app on this device took over: this one stops saving and syncing (no
+// reloads: a reload here used to set off a reload there, and so on, many times a second).
+initTabs({ whenPassive: () => setPassive(true) });
 setInterval(() => { document.getElementById('live-dot').hidden = !timer.running(); }, 1000);
 
 initMinibar();

@@ -4,7 +4,7 @@
 import { CAT_BY_CODE, CATEGORIES, typeInfo } from './framework.js';
 import { totalMinutes, setCategory, setType, fmtMin } from './model.js';
 import { state, save, activeRun, runsList, markTouch, markSetup } from './store.js';
-import { h, clear, icon, toast, openModal, closeModal, confirmBox, fmt } from './ui.js';
+import { h, clear, icon, iconPath, toast, openModal, closeModal, confirmBox, fmt } from './ui.js';
 import { createBoard, bodyBox } from './board.js';
 import { diagramDoc, defaultDiagram, zonesOnDiagram, zoneNumbers, drawingName, drawingOptions, currentDrawingId, useDrawing } from './diagram.js';
 import { zoneColour } from './colors.js';
@@ -186,7 +186,7 @@ export function openZone(zone, { editing = false } = {}) {
         h('span', { text: v.type }), h('span', { class: 'muted', text: ` ${fmt.int(v.touches)} · ${fmtMin(v.minutes)} min` }))))) : null,
     editing ? h('div', { class: 'zt-add' }, icon('plus'), h('strong', { text: 'Add a touch type here' }), addSel)
       : h('div', { class: 'row-gap' }, h('button', { type: 'button', class: 'btn primary', onclick: () => prefill(zone) }, icon('timer'), 'Log a touch here')),
-    h('h3', { class: 'zone-h', text: `Touches that happen here (${info.types.length})` }),
+    h('h3', { class: 'zone-h' }, h('span', { class: 'touch-ico' }, icon('pointer')), `Touches that happen here (${info.types.length})`),
     h('p', { class: 'muted small', text: editing ? 'Move one to another zone, reclassify it (planned ⇄ unplanned moves its logged touches too), take it off this zone, or hide it. Changes are shared with your team.' : 'Tap one for how to count it, or to start logging it.' }),
     h('div', { class: 'zt-list' }, group(info.types)),
     info.machine && !editing ? h('details', { class: 'zt-shared' },
@@ -227,10 +227,10 @@ export function lineMapCard() {
         h('div', { class: 'row-gap' },
           picker ? h('label', { class: 'run-pick' }, icon('line'), picker, icon('chevron', 'run-pick-chev')) : null,
           h('div', { class: 'seg small', role: 'group', 'aria-label': 'Badges show' },
-            [['numbers', 'Numbers'], ['guide', 'Touch types'], ['run', 'This run']].map(([k, label]) => h('button', {
+            [['numbers', 'Numbers'], ['guide', 'Touch types', 'pointer'], ['run', 'This run', 'pointer']].map(([k, label, ico]) => h('button', {
               type: 'button', class: 'seg-btn' + (view.mode === k ? ' on' : ''), 'aria-pressed': String(view.mode === k),
               onclick: () => { view.mode = k; paint(); },
-            }, label))),
+            }, ico ? h('span', { class: 'touch-ico' }, icon(ico)) : h('span', { class: 'num-ico', text: '#' }), label))),
           h('a', { class: 'btn ghost small', href: '#diagram' }, icon('edit'), 'Edit diagram'))),
       h('div', { class: 'linemap-scroll' }, host),
       h('p', { class: 'muted small lm-scroll-hint', text: 'Scroll sideways to see the whole line.' }),
@@ -260,17 +260,25 @@ export function lineMapCard() {
         badged.add(sh.zone);
         if (heat && !n) return;
         const label = heat ? fmt.int(n) : String(n);
-        const w = Math.max(26, 10 + label.length * 8);
+        // equipment numbers: a black circle; touch counts: a yellow pill with a pointing hand
+        const touch = view.mode !== 'numbers';
+        const w = touch ? 32 + label.length * 8 : Math.max(26, 10 + label.length * 8);
         // on the outline's top-right corner (a circle's shoulder); beside a text label
         const b = bodyBox(sh);
         const round = b.type === 'ellipse';
         const [bx, by] = b.type === 'text' ? [b.x + b.w + 8 + w / 2, b.y + b.h / 2]
           : round ? [b.x + b.w * 0.9, b.y + b.h * 0.1] : [b.x + b.w - 4, b.y + 4];
         const NS = 'http://www.w3.org/2000/svg';
-        const badge = document.createElementNS(NS, 'g'); badge.setAttribute('class', 'lm-badge' + (heat ? ' run' : ''));
+        const badge = document.createElementNS(NS, 'g'); badge.setAttribute('class', 'lm-badge' + (touch ? ' touch' : '') + (heat ? ' run' : ''));
         const r = document.createElementNS(NS, 'rect'); Object.entries({ x: bx - w / 2, y: by - 13, width: w, height: 26, rx: 13 }).forEach(([k, v]) => r.setAttribute(k, v));
-        const t = document.createElementNS(NS, 'text'); Object.entries({ x: bx, y: by + 5, class: 'lm-badge-t' }).forEach(([k, v]) => t.setAttribute(k, v)); t.textContent = label;
-        badge.append(r, t); g.append(badge);
+        const t = document.createElementNS(NS, 'text'); Object.entries({ x: touch ? bx + 8 : bx, y: by + 5, class: 'lm-badge-t' }).forEach(([k, v]) => t.setAttribute(k, v)); t.textContent = label;
+        badge.append(r, t);
+        if (touch) {
+          const hand = document.createElementNS(NS, 'path');
+          Object.entries({ d: iconPath('pointer'), transform: `translate(${bx - w / 2 + 6} ${by - 8}) scale(0.66)`, class: 'lm-badge-ico' }).forEach(([k, v]) => hand.setAttribute(k, v));
+          badge.append(hand);
+        }
+        g.append(badge);
         if (heat && heatOf(counts[sh.zone]?.minutes, max)?.dark) g.classList.add('hot-dark');
       },
     });
