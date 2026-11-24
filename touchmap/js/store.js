@@ -1,6 +1,6 @@
 // Everything lives in this browser's localStorage, one key, saved on every change.
 // With Team sync on, changed touches and runs are also queued for the team's Google Sheet.
-import { FRAMEWORK, DEFAULT_INFO } from './framework.js';
+import { FRAMEWORK, DEFAULT_INFO, applyFramework } from './framework.js';
 import { blankTouch, uid } from './model.js';
 
 const KEY = 'touchmap:v1';
@@ -10,14 +10,14 @@ function blankTimer() {
 }
 
 function blankSync() {
-  return { url: '', key: '', since: 0, dirtyTouches: {}, dirtyRuns: {}, tombstones: [], lastOk: null, error: null };
+  return { url: '', key: '', since: 0, dirtyTouches: {}, dirtyRuns: {}, tombstones: [], lastOk: null, error: null, dirtySetup: false, serverV: 0 };
 }
 
 function newRunObj(name, info = {}, { localOnly = false, pristine = false } = {}) {
   const now = new Date().toISOString();
   return {
     id: uid(), name, createdAt: now, updatedAt: pristine ? null : now,
-    info: { ...DEFAULT_INFO, ...info }, touches: [], lastExport: null, localOnly,
+    info: { ...DEFAULT_INFO, ...info, operatorNames: [...(info.operatorNames || [])] }, touches: [], lastExport: null, localOnly,
   };
 }
 
@@ -33,6 +33,8 @@ function fresh() {
     timer: blankTimer(),
     lastSavedId: null,
     sync: blankSync(),
+    framework: null,        // null = the template's framework; else { categories } edited in Setup
+    setupUpdatedAt: null,   // when framework or lists last changed (for sync)
   };
 }
 
@@ -48,7 +50,7 @@ function load() {
     s.timer ??= blankTimer();
     s.sync = { ...blankSync(), ...s.sync };
     for (const r of Object.values(s.runs)) {
-      r.info = { ...DEFAULT_INFO, ...r.info };
+      r.info = { ...DEFAULT_INFO, ...r.info, operatorNames: [...(r.info?.operatorNames || [])] };
       if (r.updatedAt === undefined) r.updatedAt = r.touches.length ? r.createdAt : null;
       // Demo runs stay on the device, never in the team's sheet.
       if (/^Demo shift/.test(r.name)) r.localOnly = true;
@@ -58,6 +60,17 @@ function load() {
 }
 
 export const state = load() || fresh();
+state.framework ??= null;
+state.setupUpdatedAt ??= null;
+applyFramework(state.framework);
+
+/** The touch framework or the lists changed in Setup: save, and share with the team. */
+export function markSetup() {
+  state.setupUpdatedAt = new Date().toISOString();
+  state.sync.dirtySetup = true;
+  save();
+  hooks.dirty?.();
+}
 
 let storageOk = true;
 export function save() {
@@ -121,6 +134,7 @@ export function restoreTouch(run, t) {
 
 /** Queue every run and touch on this device: used when a device first connects. */
 export function markEverything() {
+  if (state.setupUpdatedAt) state.sync.dirtySetup = true;
   for (const run of Object.values(state.runs)) {
     if (run.localOnly) continue;
     if (run.updatedAt || run.touches.length) state.sync.dirtyRuns[run.id] = 1;
@@ -129,7 +143,14 @@ export function markEverything() {
 }
 
 export const pendingCount = () =>
-  Object.keys(state.sync.dirtyTouches).length + Object.keys(state.sync.dirtyRuns).length + state.sync.tombstones.length;
+  Object.keys(state.sync.dirtyTouches).length + Object.keys(state.sync.dirtyRuns).length + state.sync.tombstones.length + (state.sync.dirtySetup && state.sync.serverV !== 1 ? 1 : 0);
+
+/** Person chips for a run: its operator names first, then roles (generic "Op n" hidden when names exist). */
+export function peopleFor(run) {
+  const names = (run?.info?.operatorNames || []).filter(Boolean);
+  const roles = names.length ? state.lists.people.filter(p => !/^Op \d+$/.test(p)) : state.lists.people;
+  return [...new Set([...names, ...roles])];
+}
 
 /* ---------- runs ---------- */
 export const activeRun = () => state.runs[state.activeRunId];
@@ -137,7 +158,8 @@ export const runsList = () => Object.values(state.runs).sort((a, b) => (a.create
 
 export function createRun(name, info, { localOnly = false } = {}) {
   const prev = activeRun();
-  const run = newRunObj(name, info ?? { ...prev?.info, from: '', to: '', skus: '', changeovers: '', cips: '' }, { localOnly });
+  // A new run keeps the line, crew and reference frame, but not the dates, SKUs, times or finish.
+  const run = newRunObj(name, info ?? { ...prev?.info, from: '', to: '', skus: '', changeovers: '', cips: '', obsStart: '', obsEnd: '', finishedAt: '' }, { localOnly });
   state.runs[run.id] = run;
   state.activeRunId = run.id;
   if (!localOnly) markRun(run);

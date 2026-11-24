@@ -57,7 +57,7 @@ export function touchForm(model, opts) {
   {
     const s = section('who', 'Person observed', { optional: true, hint: 'One row is one touch by one person. Two people on the same job are two rows.' });
     s.render = () => {
-      const list = [...lists.people];
+      const list = [...(opts.people || lists.people)];
       if (model.who && !list.includes(model.who)) list.push(model.who);
       clear(s.body, chips(list, model.who, v => { model.who = v; changed('who'); }, { allowClear: true, cls: 'small' }));
     };
@@ -86,11 +86,11 @@ export function touchForm(model, opts) {
       clear(s.body,
         groups.map(isP => h('div', { class: 'cat-group' },
           groups.length > 1 ? h('div', { class: 'cat-group-h', text: isP ? 'Planned' : 'Unplanned' }) : null,
-          h('div', { class: 'cats' }, CATEGORIES.filter(c => c.planned === isP).map(c => h('button', {
+          h('div', { class: 'cats' }, CATEGORIES.filter(c => c.planned === isP && (!c.hidden || c.code === model.category)).map(c => h('button', {
             type: 'button', class: 'cat' + (c.code === model.category ? ' on' : ''), 'aria-pressed': String(c.code === model.category),
             onclick: () => { setCategory(model, c.code); changed('planned', 'category', 'type', 'touchType'); },
           }, h('span', { class: 'code ' + (c.planned ? 'code-p' : 'code-u'), text: c.code }), h('span', { class: 'cat-name', text: c.short })))))),
-        cat ? h('p', { class: 'rule' }, h('strong', { text: cat.code + ' when: ' }), CATEGORY_RULE[cat.code]) : null);
+        cat ? h('p', { class: 'rule' }, h('strong', { text: cat.code + ' when: ' }), CATEGORY_RULE[cat.code] || cat.rule || 'Added in Setup.') : null);
     };
     sections.category = s;
   }
@@ -99,7 +99,7 @@ export function touchForm(model, opts) {
   {
     const s = section('type', 'Type of touch in category');
     s.render = () => {
-      const types = typesFor(model.category);
+      const types = typesFor(model.category, { all: true }).filter(t => !t.hidden || t.name === model.type);
       if (!types.length) { clear(s.body, h('p', { class: 'empty', text: 'Pick a category first.' })); return; }
       const info = typeInfo(model.category, model.type);
       clear(s.body,

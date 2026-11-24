@@ -35,12 +35,14 @@ export function pareto(items) {
   return sorted.map((i, idx) => { run += i.minutes; return { ...i, rank: idx + 1, cum: sum ? run / sum : null }; });
 }
 
-export function analyse(touches, info, lists = {}) {
+export function analyse(touches, info, lists = {}, { capacity: capOverride = null } = {}) {
   const rows = touches.map(t => ({ ...t, _total: totalMinutes(t) }));
   const touchesLogged = rows.reduce((s, r) => s + (Number(r.count) || 0), 0);
   const minutes = rows.reduce((s, r) => s + r._total, 0);
   const opHours = minutes / 60;
-  const { capacity, available } = referenceCapacity(info);
+  const ref = referenceCapacity(info);
+  const available = ref.available;
+  const capacity = capOverride ?? ref.capacity;
   const zones = lists.zones?.length ? lists.zones : FRAMEWORK.zones;
   const people = lists.people?.length ? lists.people : FRAMEWORK.people;
 

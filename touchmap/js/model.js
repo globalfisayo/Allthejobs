@@ -131,11 +131,60 @@ export function mergeTouches(mine, theirs) {
   return { touches: [...map.values()], added, updated };
 }
 
-export function referenceCapacity(info) {
+export function referenceCapacity(info, observedMin = null) {
   const ops = Number(info.operators) || 0;
-  const avail = (Number(info.shiftHours) || 0) - (Number(info.breakHours) || 0);
+  const shiftH = Number(info.shiftHours) || 0;
+  const avail = shiftH - (Number(info.breakHours) || 0);
   const shifts = Number(info.shifts) || 1;
-  return { available: avail, capacity: ops * avail * shifts };
+  if (info.capacityMode === 'observed' && observedMin != null && shiftH > 0) {
+    // Operators × observed hours, less the same share of breaks as a full shift.
+    return { available: avail, capacity: ops * (observedMin / 60) * (avail / shiftH), mode: 'observed' };
+  }
+  return { available: avail, capacity: ops * avail * shifts, mode: 'shift' };
+}
+
+const localDay = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+/**
+ * When the observation actually ran, per day: from the first touch's start to the last
+ * touch's end that day. Days are kept apart, so a run over two shifts doesn't count the night.
+ */
+export function observedSpans(touches) {
+  const days = new Map();
+  for (const t of touches) {
+    const s = t.start || t.createdAt;
+    if (!s) continue;
+    const start = new Date(s);
+    if (isNaN(start)) continue;
+    const endIso = t.end || (t.timedSec ? new Date(start.getTime() + t.timedSec * 1000).toISOString() : null);
+    const end = endIso ? new Date(endIso) : start;
+    const key = localDay(start);
+    const d = days.get(key) || { day: key, start, end, touches: 0, minutes: 0 };
+    if (start < d.start) d.start = start;
+    if (end > d.end) d.end = end;
+    d.touches += Number(t.count) || 0;
+    d.minutes += totalMinutes(t);
+    days.set(key, d);
+  }
+  return [...days.values()].sort((a, b) => a.day.localeCompare(b.day))
+    .map(d => ({ ...d, spanMin: Math.max(0, (d.end - d.start) / 60000) }));
+}
+
+/** Observed minutes: the manual window if both ends are set, otherwise the per-day spans. */
+export function observedMinutes(run) {
+  const i = run.info || {};
+  if (i.obsStart && i.obsEnd) {
+    const m = (new Date(i.obsEnd) - new Date(i.obsStart)) / 60000;
+    if (isFinite(m) && m > 0) return { minutes: m, source: 'manual' };
+  }
+  const spans = observedSpans(run.touches);
+  return { minutes: spans.reduce((s, d) => s + d.spanMin, 0), source: spans.length ? 'touches' : 'none', spans };
+}
+
+/** The run's reference capacity in operator-hours (template: per shift; or on observed time). */
+export function runCapacity(run) {
+  const obs = run.info?.capacityMode === 'observed' ? observedMinutes(run).minutes : null;
+  return referenceCapacity(run.info || {}, obs).capacity;
 }
 
 export function fmtClock(ms, tenths = true) {

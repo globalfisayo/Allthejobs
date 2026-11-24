@@ -8,6 +8,9 @@ export const TOUCH_TYPES = ['Physical', 'Information'];
 export const PLANNED = ['Planned', 'Unplanned'];
 export const DEFAULT_ROUTE = 'To be decided';
 
+/** The framework as shipped (the template). Setup edits a copy; "Reset to default" returns here. */
+export const DEFAULT_CATEGORIES = JSON.parse(JSON.stringify(FRAMEWORK.categories));
+/** The framework in use: mutated in place by applyFramework, so every importer sees edits. */
 export const CATEGORIES = FRAMEWORK.categories;
 export const CAT_BY_CODE = Object.fromEntries(CATEGORIES.map(c => [c.code, c]));
 
@@ -99,12 +102,46 @@ export const DEFAULT_INFO = {
   from: '', to: '',
   skus: '', changeovers: '', cips: '', observers: '',
   operators: 4, shiftHours: 12, breakHours: 0.5, shifts: 1,
+  operatorNames: Object.freeze([]),   // replace, never push: shared default
+  obsStart: '', obsEnd: '',           // manual observation window (datetime-local); empty = from the touches
+  finishedAt: '',                     // set by "Finish observation"
+  capacityMode: 'shift',              // 'shift' (template) or 'observed' (operators × observed hours)
 };
 
-export function typesFor(code) {
-  return CAT_BY_CODE[code]?.types ?? [];
+/** Types to offer for a category; hidden ones only with { all: true } (they stay valid for logged touches). */
+export function typesFor(code, { all = false } = {}) {
+  const types = CAT_BY_CODE[code]?.types ?? [];
+  return all ? types : types.filter(t => !t.hidden);
 }
 
 export function typeInfo(code, typeName) {
-  return typesFor(code).find(t => t.name === typeName) ?? null;
+  return typesFor(code, { all: true }).find(t => t.name === typeName) ?? null;
 }
+
+const codeNum = (c) => Number(String(c.code).slice(1)) || 0;
+export function sortCategories(list) {
+  return list.sort((a, b) => (a.planned === b.planned ? codeNum(a) - codeNum(b) : a.planned ? -1 : 1));
+}
+
+/** Use a customised framework (from Setup), or the default when given nothing. */
+export function applyFramework(custom) {
+  const cats = Array.isArray(custom?.categories) && custom.categories.length ? custom.categories : DEFAULT_CATEGORIES;
+  CATEGORIES.splice(0, CATEGORIES.length, ...sortCategories(JSON.parse(JSON.stringify(cats))));
+  for (const k of Object.keys(CAT_BY_CODE)) delete CAT_BY_CODE[k];
+  for (const c of CATEGORIES) {
+    c.short = c.short || String(c.name).split(': ').slice(1).join(': ') || c.name;
+    CAT_BY_CODE[c.code] = c;
+    if (c.rule) CATEGORY_RULE[c.code] = c.rule;
+  }
+}
+
+/** Next free code for a new category: P9, P10… or U8, U9… */
+export function nextCategoryCode(planned) {
+  const prefix = planned ? 'P' : 'U';
+  const nums = CATEGORIES.filter(c => c.code.startsWith(prefix)).map(codeNum);
+  return prefix + (Math.max(0, ...nums) + 1);
+}
+
+/** Is the framework in use different from the shipped default? */
+export const isCustomFramework = () => JSON.stringify(CATEGORIES.map(strip)) !== JSON.stringify(sortCategories(JSON.parse(JSON.stringify(DEFAULT_CATEGORIES))).map(strip));
+function strip(c) { return { code: c.code, name: c.name, planned: c.planned, hidden: !!c.hidden, types: c.types.map(t => ({ n: t.name, tt: t.touchType, g: t.guide, h: !!t.hidden, z: t.zones || [] })) }; }

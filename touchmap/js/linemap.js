@@ -1,7 +1,7 @@
 // The K3 line as a tappable drawing: every zone opens the touches that happen there,
 // with the framework's how-to-count guide, and can pre-fill Capture.
 // The drawing is a schematic of the line's flow, not an engineering layout.
-import { CAT_BY_CODE, typeInfo } from './framework.js';
+import { CAT_BY_CODE, CATEGORIES, typeInfo } from './framework.js';
 import { totalMinutes, setCategory, setType, fmtMin } from './model.js';
 import { state, save, activeRun } from './store.js';
 import { h, clear, icon, toast, openModal, closeModal, fmt } from './ui.js';
@@ -253,13 +253,21 @@ function prefill(zone, code, typeName) {
   toast(code ? `Ready to log: ${zone} · ${code} ${typeName}. Start the stopwatch when it begins.` : `Zone set to ${zone}.`);
 }
 
+/** Types for a zone: the built-in mapping (minus hidden types) plus types placed there in Setup. */
+function typesAt(zone) {
+  const base = (ZONE_INFO[zone]?.types || []).filter(([c, n]) => typeInfo(c, n) && !typeInfo(c, n).hidden);
+  const extra = CATEGORIES.flatMap(c => c.types.filter(t => !t.hidden && (t.zones || []).includes(zone)).map(t => [c.code, t.name]));
+  const seen = new Set();
+  return [...base, ...extra].filter(([c, n]) => { const k = c + '|' + n; if (seen.has(k)) return false; seen.add(k); return true; });
+}
+
 /* ---------- popup ---------- */
 export function openZone(zone) {
-  const info = ZONE_INFO[zone];
-  if (!info) return;
+  const info = { ...(ZONE_INFO[zone] || { machine: true, blurb: 'An area added in Setup.' }), types: typesAt(zone) };
   const here = loggedAt(zone);
   const item = ([code, name]) => {
     const c = CAT_BY_CODE[code];
+    if (!c) return null;
     const tinfo = typeInfo(code, name);
     return h('details', { class: 'zt' },
       h('summary', {},
@@ -294,7 +302,7 @@ export function openZone(zone) {
     h('div', { class: 'zt-list' }, group(info.types)),
     info.machine ? h('details', { class: 'zt-shared' },
       h('summary', {}, `Plus on every machine (${ON_EVERY_MACHINE.length}): safety, maintenance, breakdowns, defects`),
-      h('div', { class: 'zt-list' }, group(ON_EVERY_MACHINE))) : null),
+      h('div', { class: 'zt-list' }, group(ON_EVERY_MACHINE.filter(([c, n]) => typeInfo(c, n) && !typeInfo(c, n).hidden)))) : null),
   { label: zone, wide: true });
 }
 
@@ -320,12 +328,12 @@ export function lineMapCard() {
     for (const [zone, z] of Object.entries(ZONES)) {
       const c = counts[zone];
       const g = s('g', { class: 'lm-zone', tabindex: '0', role: 'button', 'data-zone': zone,
-        'aria-label': `${zone}. ${ZONE_INFO[zone].types.length} typical touches${c.rows ? `. Logged in this run: ${c.touches} touches, ${fmtMin(c.minutes)} minutes` : ''}` }, z.draw());
+        'aria-label': `${zone}. ${typesAt(zone).length} typical touches${c.rows ? `. Logged in this run: ${c.touches} touches, ${fmtMin(c.minutes)} minutes` : ''}` }, z.draw());
       if (heat) {
         const hv = heatOf(c.minutes, max);
         if (hv) { g.style.setProperty('--heat', hv.fill); g.classList.add('hot'); if (hv.dark) g.classList.add('hot-dark'); }
       }
-      const n = heat ? c.touches : ZONE_INFO[zone].types.length;
+      const n = heat ? c.touches : typesAt(zone).length;
       if (n || !heat) {
         const [bx, by] = z.badge;
         const label = heat ? fmt.int(n) : String(n);
@@ -361,6 +369,9 @@ export function lineMapCard() {
       h('div', { class: 'lm-chips' },
         h('span', { class: 'muted small', text: 'Or pick a zone: ' }),
         Object.keys(ZONES).map(zone => h('button', { type: 'button', class: 'chip small', onclick: () => openZone(zone) }, zone))),
+      state.lists.zones.some(z => !ZONES[z]) ? h('div', { class: 'lm-added' },
+        h('span', { class: 'muted small' }, icon('plus'), ' Added areas: '),
+        state.lists.zones.filter(z => !ZONES[z]).map(zone => h('button', { type: 'button', class: 'chip small', onclick: () => openZone(zone) }, icon('pin'), zone))) : null,
       heat && !run.touches.length ? h('p', { class: 'muted small', text: 'Nothing logged in this run yet: the map fills in as you log.' }) : null);
   }
   paint();

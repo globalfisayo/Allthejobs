@@ -3,9 +3,9 @@
 // other choices stay visible (the selected one is highlighted instead).
 import { CAT_BY_CODE, CATEGORIES, NOTES, READING_COMPARISON } from './framework.js';
 import { analyse, NOT_SET } from './analysis.js';
-import { fmtMin, totalMinutes, referenceCapacity } from './model.js';
+import { fmtMin, totalMinutes, runCapacity, observedMinutes } from './model.js';
 import { state, activeRun, runsList } from './store.js';
-import { h, clear, icon, fmt } from './ui.js';
+import { h, clear, icon, fmt, infoNote, openModal, closeModal, fmtDuration } from './ui.js';
 
 const SVGNS = 'http://www.w3.org/2000/svg';
 const COLOUR = {
@@ -21,13 +21,14 @@ const LEVER = {
 };
 
 /* ---------- filters ---------- */
-const F = { scope: '', day: '', observer: '', planned: '', category: '', zone: '', touchType: '', who: '', type: '', hour: '' };
+const F = { runs: [], run: '', day: '', observer: '', planned: '', category: '', zone: '', touchType: '', who: '', type: '', hour: '' };
 const UI = { catOrder: 'pareto', typeSort: 'minutes', typeAll: false, filtersOpen: false };
 let rootEl = null;
 
 const hourOf = (t) => { const iso = t.start || t.createdAt; return iso ? String(new Date(iso).getHours()).padStart(2, '0') : ''; };
 const typeKey = (t) => (t.category && t.type ? `${t.category}\u0000${t.type}` : '');
 const DIMS = {
+  run: { label: 'Run', get: t => t._run, name: v => state.runs[v]?.name || 'Run' },
   day: { label: 'Day', get: t => fmt.dayKey(t.start || t.createdAt), name: v => fmt.day(v + 'T12:00:00') },
   observer: { label: 'Observer', get: t => t.observer },
   planned: { label: 'Planned / Unplanned', get: t => t.planned },
@@ -42,15 +43,74 @@ const DIM_KEYS = Object.keys(DIMS);
 const activeDims = () => DIM_KEYS.filter(d => F[d]);
 
 function scope() {
-  let runs;
-  if (F.scope === 'all') runs = runsList().filter(r => !r.localOnly || r.id === state.activeRunId);
-  else runs = [state.runs[F.scope] || activeRun()];
-  if (F.scope && F.scope !== 'all' && !state.runs[F.scope]) F.scope = '';
-  const touches = runs.flatMap(r => r.touches);
-  const capacity = runs.reduce((s, r) => s + referenceCapacity(r.info).capacity, 0);
-  const label = F.scope === 'all' ? `All runs (${runs.length})` : runs[0].name;
+  F.runs = F.runs.filter(id => state.runs[id]);
+  const runs = F.runs.length ? F.runs.map(id => state.runs[id]) : [activeRun()];
+  if (F.run && !runs.some(r => r.id === F.run)) F.run = '';
+  const touches = runs.flatMap(r => r.touches.map(t => ({ ...t, _run: r.id })));
+  const capacity = runs.filter(r => !F.run || r.id === F.run).reduce((s, r) => s + runCapacity(r), 0);
+  const label = runs.length === 1 ? runs[0].name : `${runs.length} runs`;
   return { runs, touches, capacity, label };
 }
+
+/** Open Analysis on these runs (one, several, or all), with other filters cleared. */
+export function analyseRuns(ids) {
+  F.runs = [...new Set(ids)].filter(id => state.runs[id]);
+  for (const d of DIM_KEYS) F[d] = '';
+  if (location.hash.startsWith('#analysis')) rerender(); else location.hash = '#analysis';
+}
+
+function runPicker() {
+  const chosen = new Set(F.runs.length ? F.runs : [state.activeRunId]);
+  const list = runsList().slice().reverse();
+  const box = h('div', { class: 'confirm run-picker' });
+  const paint = () => clear(box,
+    h('div', { class: 'wiz-top' }, h('h2', {}, icon('history'), ' Which runs?'),
+      h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Close', onclick: () => closeModal() }, icon('close'))),
+    h('div', { class: 'row-gap' },
+      h('button', { type: 'button', class: 'btn ghost small', onclick: () => { chosen.clear(); chosen.add(state.activeRunId); paint(); } }, icon('timer'), 'This run'),
+      h('button', { type: 'button', class: 'btn ghost small', onclick: () => { chosen.clear(); list.filter(r => !r.localOnly).forEach(r => chosen.add(r.id)); paint(); } }, icon('layers'), 'All runs')),
+    h('ul', { class: 'pick-list' }, list.map(r => {
+      const cb = h('input', { type: 'checkbox', checked: chosen.has(r.id), id: 'pk-' + r.id });
+      cb.addEventListener('change', () => { if (cb.checked) chosen.add(r.id); else chosen.delete(r.id); });
+      const days = [...new Set(r.touches.map(t => fmt.dayKey(t.start || t.createdAt)).filter(Boolean))].sort();
+      return h('li', {}, h('label', { for: 'pk-' + r.id }, cb,
+        h('span', { class: 'pk-name', text: r.name }),
+        h('span', { class: 'muted small' }, icon('calendar'), days.length ? fmt.day(days[0] + 'T12:00:00') + (days.length > 1 ? ` +${days.length - 1}` : '') : '–', '  ', icon('hand'), String(r.touches.length))));
+    })),
+    h('div', { class: 'row-end' },
+      h('button', { type: 'button', class: 'btn primary', onclick: () => { closeModal(); analyseRuns(chosen.size ? [...chosen] : [state.activeRunId]); } }, icon('check'), 'Show')));
+  paint();
+  openModal(box, { label: 'Which runs?' });
+}
+
+/** One row per run when several are in view: how they compare. */
+function runsCompared(sc) {
+  const rows = sc.runs.map(r => {
+    let planned = 0, unplanned = 0, touches = 0;
+    for (const t of filtered(sc.touches.filter(x => x._run === r.id), ['run'])) {
+      const m = totalMinutes(t);
+      if (t.planned === 'Planned') planned += m; else if (t.planned === 'Unplanned') unplanned += m;
+      touches += Number(t.count) || 0;
+    }
+    const cap = runCapacity(r);
+    const days = [...new Set(r.touches.map(t => fmt.dayKey(t.start || t.createdAt)).filter(Boolean))].sort();
+    return { r, planned, unplanned, total: planned + unplanned, touches, cap, cov: cap ? (planned + unplanned) / 60 / cap : null, days, obs: observedMinutes(r).minutes };
+  });
+  const max = Math.max(...rows.map(x => x.total), 0) || 1;
+  return card('Runs compared', 'One row per run, with the other filters applied. Tap a run to look at it alone.',
+    legendRow(),
+    h('div', { class: 'cmp' }, rows.map(x => {
+      const el = h('div', { class: 'cmp-row' + selState('run', x.r.id) },
+        h('div', { class: 'cmp-name' }, h('strong', { text: x.r.name }),
+          h('span', { class: 'muted small' }, icon('calendar'), x.days.length ? fmt.day(x.days[0] + 'T12:00:00') : '–', ' ', icon('clock'), fmtDuration(x.obs))),
+        h('div', { class: 'cmp-bar' },
+          h('span', { style: { width: `${(x.planned / max) * 100}%`, background: COLOUR.Planned } }),
+          h('span', { style: { width: `${(x.unplanned / max) * 100}%`, background: COLOUR.Unplanned } })),
+        h('div', { class: 'cmp-val' }, h('strong', { text: `${fmtMin(x.total)} min` }), h('span', { class: 'muted small', text: `${fmt.pct(x.cov)} cov · ${fmt.int(x.touches)} t` })));
+      return interactive(el, { lead: `${fmtMin(x.total)} min`, rest: [x.r.name, `Planned ${fmtMin(x.planned)} · Unplanned ${fmtMin(x.unplanned)}`, `Coverage ${fmt.pct(x.cov)}`], onPick: () => toggle({ run: x.r.id }) });
+    })));
+}
+const legendRow = () => legend([{ label: 'Planned', colour: COLOUR.Planned }, { label: 'Unplanned', colour: COLOUR.Unplanned }]);
 
 function filtered(touches, except = []) {
   const skip = new Set(except);
@@ -170,7 +230,7 @@ function donutCard(title, note, d, items, dim) {
     h('h2', { class: 'card-h', text: title }),
     h('div', { class: 'donut-wrap' }, d),
     legend(items.map(i => ({ key: i.key, label: `${i.label} · ${fmtMin(i.value)} min`, colour: i.colour })), { dim }),
-    note ? h('p', { class: 'card-note', text: note }) : null);
+    note ? infoNote(note) : null);
 }
 
 function barList(items, { label, colour = () => COLOUR.single, dim, keyOf = i => i.key, highlight = () => false }) {
@@ -214,12 +274,13 @@ function table(label, blk, nameOf = i => i.key, { cum = false } = {}) {
           cum ? h('td') : null)))));
 }
 
+const CARD_ICON = { 'Which lever applies': 'layers', 'When in the shift': 'clock', 'By category': 'tag', 'By zone / equipment': 'pin', 'By person observed': 'users', 'Where × why: zone by category': 'grid', 'Types of touch': 'hand', 'Runs compared': 'history' };
 function card(title, note, ...body) {
-  return h('section', { class: 'card' }, h('h2', { class: 'card-h', text: title }), body, note ? h('p', { class: 'card-note', text: note }) : null);
+  return h('section', { class: 'card' }, h('h2', { class: 'card-h' }, CARD_ICON[title] ? icon(CARD_ICON[title]) : null, title), body, note ? infoNote(note) : null);
 }
 
-function tile(label, value, sub) {
-  return h('div', { class: 'tile' }, h('div', { class: 'tile-label', text: label }), h('div', { class: 'tile-val', text: value }), sub ? h('div', { class: 'tile-sub', text: sub }) : null);
+function tile(label, value, sub, ico) {
+  return h('div', { class: 'tile' }, h('div', { class: 'tile-label' }, ico ? icon(ico) : null, label), h('div', { class: 'tile-val', text: value }), sub ? h('div', { class: 'tile-sub', text: sub }) : null);
 }
 
 function segBar(parts, { total, ariaLabel }) {
@@ -422,21 +483,19 @@ function filterBar(sc) {
     s.addEventListener('change', () => { F[dim] = s.value; rerender(); });
     return h('label', { class: 'filter' }, h('span', { text: DIMS[dim]?.label || 'Run' }), s);
   };
-  const runOpts = [['all', 'All runs'], ...runsList().filter(r => r.id !== state.activeRunId).map(r => [r.id, r.name])];
-  const runSel = h('select', { 'aria-label': 'Run', class: F.scope ? 'on' : '' },
-    h('option', { value: '', text: `This run · ${activeRun().name}` }),
-    runOpts.map(([v, t]) => h('option', { value: v, selected: F.scope === v, text: t })));
-  runSel.addEventListener('change', () => { F.scope = runSel.value; rerender(); });
+  const multi = F.runs.length > 1 || (F.runs.length === 1 && F.runs[0] !== state.activeRunId);
+  const runBtn = h('button', { type: 'button', class: 'run-btn' + (multi ? ' on' : ''), onclick: runPicker },
+    icon('history'), h('span', { text: sc.runs.length > 1 ? `${sc.runs.length} runs` : sc.runs[0].name }), icon('chevron'));
 
   const cats = values('category').sort((a, b) => CATEGORIES.findIndex(c => c.code === a) - CATEGORIES.findIndex(c => c.code === b));
   const show = (dim, list) => (list.length > 1 || F[dim]);
-  const chips = ['type', 'hour'].filter(d => F[d]).map(d => h('button', { type: 'button', class: 'chip small on', onclick: () => { F[d] = ''; rerender(); } }, `${DIMS[d].label}: ${DIMS[d].name(F[d])}`, ' ✕'));
+  const chips = ['run', 'type', 'hour'].filter(d => F[d]).map(d => h('button', { type: 'button', class: 'chip small on', onclick: () => { F[d] = ''; rerender(); } }, `${DIMS[d].label}: ${DIMS[d].name(F[d])}`, ' ✕'));
   const any = activeDims().length;
   const wide = window.matchMedia('(min-width: 760px)').matches;
   const box = h('details', { class: 'an-filters', open: wide || UI.filtersOpen || false },
     h('summary', { class: 'btn ghost small' }, icon('list'), any ? `Filters · ${any} on` : 'Filters'),
     h('div', { class: 'an-filter-row' },
-      h('label', { class: 'filter' }, h('span', { text: 'Run' }), runSel),
+      h('label', { class: 'filter' }, h('span', { text: 'Runs' }), runBtn),
       show('day', values('day')) ? select('day', values('day').map(v => [v, DIMS.day.name(v)]), 'All days') : null,
       show('observer', values('observer')) ? select('observer', values('observer').map(v => [v, v]), 'All observers') : null,
       select('planned', ['Planned', 'Unplanned'].map(v => [v, v]), 'Planned + unplanned'),
@@ -476,15 +535,15 @@ export function renderInsights(root) {
 
   const head = h('div', { class: 'view-head' },
     h('div', {},
-      h('h1', { class: 'view-title', text: 'Analysis' }),
-      h('p', { class: 'view-sub', text: `${sc.label}${filterNote ? ` · filtered: ${filterNote}` : ' · updates itself as the log fills'}` })),
+      h('h1', { class: 'view-title' }, icon('chart', 'title-ico'), 'Analysis'),
+      h('p', { class: 'view-sub', text: `${sc.label}${filterNote ? ` · filtered: ${filterNote}` : ''}` })),
     h('button', { type: 'button', class: 'btn ' + (presenting ? 'primary' : 'ghost'), onclick: () => setPresent(!presenting) }, icon(presenting ? 'close' : 'chart'), presenting ? 'Exit presentation' : 'Present'));
 
   if (!sc.touches.length) {
     clear(root, h('section', { class: 'insights' }, head,
       h('div', { class: 'empty-state' }, icon('chart', 'big'),
-        h('p', { text: 'The analysis fills itself as you log touches. Want to see it working first? Load the demo run from the Run tab.' }),
-        h('a', { class: 'btn ghost', href: '#run' }, icon('run'), 'Open Run'))));
+        h('p', { text: 'The analysis fills itself as you log touches. Want to see it working first? Load the demo run from Setup → This device.' }),
+        h('a', { class: 'btn ghost', href: '#setup' }, icon('gear'), 'Open Setup'))));
     return;
   }
   if (!all.length) {
@@ -547,14 +606,16 @@ export function renderInsights(root) {
           segBar(coverParts, { total: Math.max(hd.capacity, hd.opHours), ariaLabel: `Planned ${fmt.dec(hd.plannedHours)} h, unplanned ${fmt.dec(hd.unplannedHours)} h, of ${fmt.dec(hd.capacity)} h reference capacity` }),
           h('div', { class: 'axis-ends' }, h('span', { text: '0' }), h('span', { text: `${fmt.dec(hd.capacity)} op-hours reference capacity` })),
           legend(coverParts.map(p => ({ label: `${p.label} · ${fmt.dec(p.value)} h`, colour: p.colour, track: p.track }))),
-          over ? h('p', { class: 'warn-line' }, icon('warn'), 'Mapped hours exceed the reference capacity. Check the Run tab: operators, shift length and shifts covered.') : null)),
+          over ? h('p', { class: 'warn-line' }, icon('warn'), 'Mapped hours exceed the reference capacity. Check the run’s reference frame in Runs: operators, shift length and shifts covered.') : null)),
       h('div', { class: 'tiles' },
-        tile('Touches logged', fmt.int(hd.touchesLogged), `${a.rows} rows`),
-        tile('Mapped minutes', fmt.int(hd.minutes)),
-        tile('Mapped op-hours', fmt.dec(hd.opHours)),
-        tile('Reference capacity', fmt.dec(hd.capacity), 'operator-hours'),
-        tile('Unexplained gap', fmt.dec(hd.gap), 'operator-hours')),
-      presenting ? null : h('p', { class: 'card-note', text: READING_COMPARISON })),
+        tile('Touches', fmt.int(hd.touchesLogged), `${a.rows} rows`, 'hand'),
+        tile('Mapped minutes', fmt.int(hd.minutes), null, 'timer'),
+        tile('Mapped op-hours', fmt.dec(hd.opHours), null, 'users'),
+        tile('Reference', fmt.dec(hd.capacity), 'operator-hours', 'target'),
+        tile('Gap', fmt.dec(hd.gap), 'operator-hours', 'gauge')),
+      presenting ? null : infoNote(READING_COMPARISON, 'Reading the gap')),
+
+    sc.runs.length > 1 ? runsCompared(sc) : null,
 
     h('div', { class: 'grid-3' },
       donutCard('Planned vs unplanned', NOTES.planned,
