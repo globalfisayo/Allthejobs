@@ -1,6 +1,7 @@
 // A small whiteboard: shapes, text, lines and arrows that snap to shapes, images and icons,
 // colours and dashes, alignment snapping, undo/redo, zoom and pan, PNG/SVG export.
-// Used for the Guide diagram (full editor) and for chart annotations (overlay mode).
+// Shapes can be grouped (a machine drawn from circles and squares becomes one piece) and a group
+// saved to a shared library. Used for the Guide diagram (full editor) and for chart annotations.
 import { h, clear, icon, toast, PATHS } from './ui.js';
 
 const NS = 'http://www.w3.org/2000/svg';
@@ -13,7 +14,7 @@ const s = (tag, attrs = {}, ...kids) => {
 let idSeq = 0;
 export const newId = () => 'sh' + Date.now().toString(36) + (idSeq++).toString(36) + Math.random().toString(36).slice(2, 5);
 const clone = (o) => JSON.parse(JSON.stringify(o));
-const BOX = new Set(['rect', 'ellipse', 'triangle', 'diamond', 'hopper', 'text', 'image', 'icon']);
+const BOX = new Set(['rect', 'ellipse', 'triangle', 'diamond', 'hopper', 'text', 'image', 'icon', 'path', 'group']);
 export const COLOURS = ['#141414', '#6A6A6A', '#CFCFCC', '#FFFFFF', '#F40009', '#FFD9DB', '#1E63B8', '#DCE8F7', '#159A6A', '#DFF2EA', '#6250D6', '#EAE6FB', '#EB6834', '#EDA100', '#FFF3C4'];
 let clipboard = [];
 
@@ -21,11 +22,86 @@ let clipboard = [];
 export function bbox(sh, shapes) {
   if (sh.type === 'line') {
     const [a, b] = ends(sh, shapes);
-    return { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: Math.abs(a.x - b.x), h: Math.abs(a.y - b.y) };
+    const pts = [a, ...(sh.via || []), b];
+    const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
+    return { x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) };
   }
   return { x: sh.x, y: sh.y, w: sh.w, h: sh.h };
 }
+
+/* ---------- groups ---------- */
+// A group keeps its children in its own coordinates (0..cw, 0..ch); drawing maps them onto the
+// group's box, so moving or resizing the group moves or scales everything in it.
+export function placed(c, g) {
+  const sx = g.w / (g.cw || g.w || 1), sy = g.h / (g.ch || g.h || 1);
+  const k = Math.min(sx, sy);
+  const o = { ...c };
+  if (c.type === 'line') {
+    Object.assign(o, { x1: g.x + c.x1 * sx, y1: g.y + c.y1 * sy, x2: g.x + c.x2 * sx, y2: g.y + c.y2 * sy, from: null, to: null });
+    if (c.via) o.via = c.via.map(p => ({ x: g.x + p.x * sx, y: g.y + p.y * sy }));
+  } else Object.assign(o, { x: g.x + c.x * sx, y: g.y + c.y * sy, w: c.w * sx, h: c.h * sy });
+  if (c.fontSize) o.fontSize = c.fontSize * k;
+  if (c.radius) o.radius = c.radius * k;
+  return o;
+}
+const bodyIndex = (g) => (g.children || []).findIndex(c => c.body);
+const labelIndex = (g) => {
+  const kids = g.children || [];
+  const i = kids.findIndex(c => c.label);
+  return i >= 0 ? i : kids.findIndex(c => c.type === 'text' || (c.text && c.type !== 'line'));
+};
+/** The box of the shape that carries a group's outline (where anchors and badges go). */
+export function bodyBox(sh) {
+  if (sh.type === 'group') {
+    const i = bodyIndex(sh);
+    if (i >= 0) return bodyBox(placed(sh.children[i], sh));
+  }
+  return { x: sh.x, y: sh.y, w: sh.w, h: sh.h, type: sh.type };
+}
+/** Shape(s) a style change applies to: a group's body (fill, border) or its label (text). */
+function targetsOf(sh, role) {
+  if (sh.type !== 'group') return [sh];
+  const kids = sh.children || [];
+  if (role === 'label') { const i = labelIndex(sh); return i >= 0 ? [kids[i]] : []; }
+  const bodies = kids.filter(c => c.body);
+  const list = bodies.length ? bodies : kids.filter(c => c.type !== 'text' && c.type !== 'line' && c.fill !== 'none');
+  return list.flatMap(c => (c.type === 'group' ? targetsOf(c, role) : [c]));
+}
+/** A shape (or line) moved into a group's own coordinates, with line ends resolved. */
+function toLocal(sh, x, y, shapes) {
+  const c = clone(sh);
+  if (c.type === 'line') {
+    const [a, b] = ends(sh, shapes);
+    Object.assign(c, { x1: a.x - x, y1: a.y - y, x2: b.x - x, y2: b.y - y, from: null, to: null });
+    if (c.via) c.via = c.via.map(p => ({ x: p.x - x, y: p.y - y }));
+  } else { c.x -= x; c.y -= y; }
+  return c;
+}
+/** Wrap shapes into a group (their own coordinates relative to the group's box). */
+export function makeGroup(list, shapes, id = newId()) {
+  const bs = list.map(sh => bbox(sh, shapes));
+  const x = Math.min(...bs.map(b => b.x)), y = Math.min(...bs.map(b => b.y));
+  const w = Math.max(1, Math.max(...bs.map(b => b.x + b.w)) - x), hh = Math.max(1, Math.max(...bs.map(b => b.y + b.h)) - y);
+  const zoned = list.find(sh => sh.zone);
+  const children = list.map(sh => {
+    const c = toLocal(sh, x, y, shapes);
+    c.id = newId();
+    if (zoned && sh === zoned) c.body = true;
+    delete c.zone;
+    return c;
+  });
+  if (!children.some(c => c.body)) {
+    const boxes = children.filter(c => c.type !== 'text' && c.type !== 'line');
+    const big = boxes.sort((a, b) => b.w * b.h - a.w * a.h)[0];
+    if (big) big.body = true;
+  }
+  const g = { id, type: 'group', x, y, w, h: hh, cw: w, ch: hh, children };
+  if (zoned) g.zone = zoned.zone;
+  return g;
+}
+
 function anchorPoint(sh, a) {
+  if (sh.type === 'group') { const i = bodyIndex(sh); if (i >= 0) return anchorPoint(placed(sh.children[i], sh), a); }
   const { x, y, w, h: hh } = sh;
   const pts = {
     n: { x: x + w / 2, y }, s: { x: x + w / 2, y: y + hh }, e: { x: x + w, y: y + hh / 2 }, w: { x, y: y + hh / 2 }, c: { x: x + w / 2, y: y + hh / 2 },
@@ -42,12 +118,29 @@ function ends(line, shapes) {
 }
 function routePoints(line, shapes) {
   const [a, b] = ends(line, shapes);
+  if (line.via?.length) return [a, ...line.via, b];
   if (line.route !== 'elbow') return [a, b];
   const horiz = a.a ? (a.a === 'e' || a.a === 'w') : Math.abs(b.x - a.x) >= Math.abs(b.y - a.y);
   if (horiz) { const mx = (a.x + b.x) / 2; return [a, { x: mx, y: a.y }, { x: mx, y: b.y }, b]; }
   const my = (a.y + b.y) / 2; return [a, { x: a.x, y: my }, { x: b.x, y: my }, b];
 }
 const dashOf = (d, w) => (d === 'dashed' ? `${w * 4} ${w * 3}` : d === 'dotted' ? `0.1 ${Math.max(4, w * 2.5)}` : null);
+/** Chevrons every `gap` units along a polyline, pointing the way it runs (a conveyor's flow). */
+function chevrons(pts, colour, gap = 120) {
+  const out = [];
+  let next = gap / 2, walked = 0;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p = pts[i], q = pts[i + 1];
+    const len = Math.hypot(q.x - p.x, q.y - p.y);
+    const ang = (Math.atan2(q.y - p.y, q.x - p.x) * 180) / Math.PI;
+    for (; next <= walked + len; next += gap) {
+      const f = len ? (next - walked) / len : 0;
+      out.push(s('path', { d: 'M-6 -7 L5 0 L-6 7', transform: `translate(${p.x + (q.x - p.x) * f} ${p.y + (q.y - p.y) * f}) rotate(${ang})`, fill: 'none', stroke: colour, 'stroke-width': 2.5, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', class: 'bd-chev' }));
+    }
+    walked += len;
+  }
+  return out;
+}
 function arrowHead(p, q, w, colour) {
   const ang = Math.atan2(p.y - q.y, p.x - q.x);
   const size = 7 + w * 2.2;
@@ -69,21 +162,35 @@ function wrap(text, width, size) {
 }
 
 /* ---------- drawing one shape ---------- */
-export function drawShape(sh, shapes, { fillFor } = {}) {
-  const g = s('g', { 'data-id': sh.id, class: 'bd-shape' + (sh.zone ? ' bd-zone' : ''), opacity: sh.opacity ?? 1 });
-  const stroke = sh.stroke ?? '#141414';
+export function drawShape(sh, shapes, { fillFor, inner = false } = {}) {
+  const g = inner ? s('g', { class: 'bd-part', opacity: sh.opacity ?? null })
+    : s('g', { 'data-id': sh.id, class: 'bd-shape' + (sh.zone ? ' bd-zone' : ''), opacity: sh.opacity ?? 1 });
   const sw = sh.strokeWidth ?? 2;
-  const dash = dashOf(sh.dash, sw);
-  const fill = (fillFor && fillFor(sh)) || (sh.fill === 'auto' ? '#FFFFFF' : (sh.fill || 'none'));
-  const common = { fill, stroke: sw ? stroke : 'none', 'stroke-width': sw, 'stroke-dasharray': dash, 'stroke-linecap': sh.dash === 'dotted' ? 'round' : null, 'stroke-linejoin': 'round', class: 'bd-body' };
+  const auto = (x) => (fillFor && fillFor(x)) || null;
+  const stroke = sh.stroke === 'auto' ? (auto({ ...sh, fill: 'auto' }) || sh.base || '#DCDCD8') : (sh.stroke ?? '#141414');
+  const dash = sh.dash === 'belt' ? null : dashOf(sh.dash, sw);
+  const fill = sh.fill === 'auto' ? auto(sh) || sh.base || '#FFFFFF' : sh.fill || 'none';
+  const cls = 'bd-body' + (sh.detail ? ' bd-detail' : '');
+  const common = { fill, stroke: sw ? stroke : 'none', 'stroke-width': sw, 'stroke-dasharray': dash, 'stroke-linecap': sh.dash === 'dotted' ? 'round' : null, 'stroke-linejoin': 'round', class: cls };
   const { x, y, w, h: hh } = sh;
+  if (sh.type === 'group') {
+    const zoneFill = auto({ ...sh, fill: 'auto' });
+    const childFill = (c) => (c.fill === 'auto' || c.stroke === 'auto' ? zoneFill : null);
+    for (const c of sh.children || []) g.append(drawShape(placed(c, sh), shapes, { fillFor: childFill, inner: true }));
+    if (!inner) g.append(s('rect', { x, y, width: Math.max(w, 1), height: Math.max(hh, 1), fill: 'transparent', class: 'bd-hit' }));
+    return g;
+  }
   if (sh.type === 'line') {
     const pts = routePoints(sh, shapes);
     const d = 'M' + pts.map(p => `${p.x} ${p.y}`).join(' L');
-    g.append(s('path', { d, fill: 'none', stroke, 'stroke-width': sw, 'stroke-dasharray': dash, 'stroke-linecap': sh.dash === 'dotted' ? 'round' : 'round', 'stroke-linejoin': 'round', class: 'bd-body' }));
+    g.append(s('path', { d, fill: 'none', stroke, 'stroke-width': sw, 'stroke-dasharray': dash, 'stroke-linecap': sh.dash === 'belt' ? 'butt' : 'round', 'stroke-linejoin': 'round', class: cls + (sh.dash === 'belt' ? ' bd-belt' : '') }));
+    if (sh.dash === 'belt') {
+      g.append(s('path', { d, fill: 'none', stroke: '#FFFFFF', 'stroke-width': Math.max(1.5, sw / 9), 'stroke-dasharray': `${sw / 3} ${sw / 1.8}`, class: 'bd-belt-marks' }));
+      g.append(...chevrons(pts, sh.chevronColour || '#6A6A6A'));
+    }
     if (sh.arrowEnd) g.append(arrowHead(pts[pts.length - 1], pts[pts.length - 2], sw, stroke));
     if (sh.arrowStart) g.append(arrowHead(pts[0], pts[1], sw, stroke));
-    g.append(s('path', { d, fill: 'none', stroke: 'transparent', 'stroke-width': Math.max(18, sw + 14), class: 'bd-hit' }));
+    if (!inner) g.append(s('path', { d, fill: 'none', stroke: 'transparent', 'stroke-width': Math.max(18, sw + 14), class: 'bd-hit' }));
     if (sh.text) {
       const mid = pts[Math.floor(pts.length / 2) - (pts.length % 2 ? 0 : 1)];
       const nxt = pts[Math.floor(pts.length / 2)];
@@ -98,6 +205,10 @@ export function drawShape(sh, shapes, { fillFor } = {}) {
   else if (sh.type === 'triangle') g.append(s('polygon', { points: `${x + w / 2},${y} ${x + w},${y + hh} ${x},${y + hh}`, ...common }));
   else if (sh.type === 'diamond') g.append(s('polygon', { points: `${x + w / 2},${y} ${x + w},${y + hh / 2} ${x + w / 2},${y + hh} ${x},${y + hh / 2}`, ...common }));
   else if (sh.type === 'hopper') g.append(s('polygon', { points: `${x},${y} ${x + w},${y} ${x + w * 0.8},${y + hh} ${x + w * 0.2},${y + hh}`, ...common }));
+  else if (sh.type === 'path') {
+    const vb = sh.vb || [0, 0, w || 1, hh || 1];
+    g.append(s('path', { d: sh.d, transform: `translate(${x} ${y}) scale(${w / (vb[2] || 1)} ${hh / (vb[3] || 1)}) translate(${-vb[0]} ${-vb[1]})`, ...common, 'vector-effect': 'non-scaling-stroke' }));
+  }
   else if (sh.type === 'image') {
     g.append(s('image', { href: sh.src, x, y, width: w, height: hh, preserveAspectRatio: 'xMidYMid meet' }));
     if (sw) g.append(s('rect', { x, y, width: w, height: hh, fill: 'none', stroke, 'stroke-width': sw, 'stroke-dasharray': dash, rx: sh.radius ?? 0 }));
@@ -107,7 +218,7 @@ export function drawShape(sh, shapes, { fillFor } = {}) {
     g.append(svgIcon);
   }
   // hit area for text, icons and images
-  g.append(s('rect', { x, y, width: Math.max(w, 1), height: Math.max(hh, 1), fill: 'transparent', class: 'bd-hit' }));
+  if (!inner) g.append(s('rect', { x, y, width: Math.max(w, 1), height: Math.max(hh, 1), fill: 'transparent', class: 'bd-hit' }));
   if (sh.text && sh.type !== 'icon' && sh.type !== 'image') {
     const size = sh.fontSize || 14;
     const pad = 8;
@@ -118,7 +229,7 @@ export function drawShape(sh, shapes, { fillFor } = {}) {
     const block = lines.length * lh;
     const valign = sh.valign || 'middle';
     const top = valign === 'top' ? y + pad : valign === 'bottom' ? y + hh - pad - block : y + (hh - block) / 2;
-    const t = s('text', { x: tx, 'text-anchor': align === 'left' ? 'start' : align === 'right' ? 'end' : 'middle', 'font-size': size, 'font-weight': sh.bold ? 750 : 550, fill: sh.textColor || '#141414', class: 'bd-text', 'letter-spacing': sh.caps ? '0.12em' : null });
+    const t = s('text', { x: tx, 'text-anchor': align === 'left' ? 'start' : align === 'right' ? 'end' : 'middle', 'font-size': size, 'font-weight': sh.bold ? 750 : 550, fill: sh.textColor || '#141414', class: 'bd-text' + (sh.onBody ? ' on-body' : ''), 'letter-spacing': sh.caps ? '0.12em' : null });
     lines.forEach((ln, i) => { const sp = s('tspan', { x: tx, y: top + lh * (i + 0.78) }); sp.textContent = ln; t.append(sp); });
     g.append(t);
   }
@@ -216,6 +327,15 @@ export function createBoard(host, opts) {
       if (sh.type === 'line') {
         const [a, b] = ends(sh, shapes);
         for (const [p, which] of [[a, 'from'], [b, 'to']]) gUi.append(s('circle', { cx: p.x, cy: p.y, r: 7 * k, class: 'bd-handle end' + (sh[which] ? ' attached' : ''), 'data-handle': which, 'data-for': sh.id, 'stroke-width': 2 * k }));
+        if (sel.size === 1 && sh.route !== 'elbow') {
+          // drag a small square to bend the line; drag a bend to move it
+          const pts = routePoints(sh, shapes);
+          (sh.via || []).forEach((p, i) => gUi.append(s('rect', { x: p.x - 6 * k, y: p.y - 6 * k, width: 12 * k, height: 12 * k, rx: 6 * k, class: 'bd-handle via', 'data-handle': `via:${i}`, 'data-for': sh.id, 'stroke-width': 2 * k })));
+          for (let i = 0; i < pts.length - 1; i++) {
+            const m = { x: (pts[i].x + pts[i + 1].x) / 2, y: (pts[i].y + pts[i + 1].y) / 2 };
+            if (Math.hypot(pts[i + 1].x - pts[i].x, pts[i + 1].y - pts[i].y) > 40 * k) gUi.append(s('rect', { x: m.x - 4.5 * k, y: m.y - 4.5 * k, width: 9 * k, height: 9 * k, rx: 2 * k, class: 'bd-handle mid', 'data-handle': `mid:${i}`, 'data-for': sh.id, 'stroke-width': 1.5 * k }));
+          }
+        }
         continue;
       }
       const { x, y, w, h: hh } = sh;
@@ -316,8 +436,16 @@ export function createBoard(host, opts) {
     }
     if (handle) {
       const sh = byId(handle.dataset.for);
-      if (sh.type === 'line') drag = { kind: 'end', id: sh.id, which: handle.dataset.handle };
-      else drag = { kind: 'resize', id: sh.id, h: handle.dataset.handle, orig: { ...sh }, p0: p };
+      const hd = handle.dataset.handle;
+      if (sh.type === 'line' && hd.startsWith('via:')) drag = { kind: 'via', id: sh.id, i: Number(hd.slice(4)) };
+      else if (sh.type === 'line' && hd.startsWith('mid:')) {
+        const i = Number(hd.slice(4));
+        sh.via = [...(sh.via || [])];
+        sh.via.splice(i, 0, { x: snapV(p.x), y: snapV(p.y) });
+        drag = { kind: 'via', id: sh.id, i };
+        render();
+      } else if (sh.type === 'line') drag = { kind: 'end', id: sh.id, which: hd };
+      else drag = { kind: 'resize', id: sh.id, h: hd, orig: { ...sh }, p0: p };
       return;
     }
     if (shapeEl) {
@@ -371,6 +499,11 @@ export function createBoard(host, opts) {
       sh.x = Math.min(drag.x0, drag.x0 + w); sh.y = Math.min(drag.y0, drag.y0 + hh); sh.w = Math.abs(w); sh.h = Math.abs(hh);
       schedule(); return;
     }
+    if (drag.kind === 'via') {
+      const sh = byId(drag.id);
+      if (sh?.via?.[drag.i]) { sh.via[drag.i] = { x: snapV(p.x), y: snapV(p.y) }; schedule(); }
+      return;
+    }
     if (drag.kind === 'end') {
       const sh = byId(drag.id);
       const sn = snapAnchor(p, null);
@@ -388,7 +521,7 @@ export function createBoard(host, opts) {
       if (drag.h.includes('s')) hh = snapV(o.y + o.h + dy) - o.y;
       if (drag.h.includes('w')) { const nx = snapV(o.x + dx); w = o.x + o.w - nx; x = nx; }
       if (drag.h.includes('n')) { const ny = snapV(o.y + dy); hh = o.y + o.h - ny; y = ny; }
-      if ((e.shiftKey || sh.type === 'image' || sh.type === 'icon') && drag.h.length === 2) {
+      if ((e.shiftKey || sh.type === 'image' || sh.type === 'icon' || sh.type === 'group') && drag.h.length === 2) {
         const ratio = o.w / o.h;
         if (w / hh > ratio) w = hh * ratio; else hh = w / ratio;
         if (drag.h.includes('w')) x = o.x + o.w - w;
@@ -408,6 +541,7 @@ export function createBoard(host, opts) {
         if (sh.type === 'line') {
           if (!sh.from) { sh.x1 = o.x1 + dx; sh.y1 = o.y1 + dy; }
           if (!sh.to) { sh.x2 = o.x2 + dx; sh.y2 = o.y2 + dy; }
+          if (o.via) sh.via = o.via.map(q => ({ x: q.x + dx, y: q.y + dy }));
         } else { sh.x = o.x + dx; sh.y = o.y + dy; }
       }
       schedule();
@@ -457,24 +591,32 @@ export function createBoard(host, opts) {
   }
 
   /* ----- text editing in place ----- */
-  let editing = null;
+  let editing = null;       // { id, idx } idx: a group's label child
   let editOrig = '';
-  function showTextEdit(sh) {
-    if (!sh || sh.type === 'icon' || sh.type === 'image') return;
-    editing = sh.id;
+  const editObj = () => { const sh = editing && byId(editing.id); return sh && editing.idx != null ? sh.children?.[editing.idx] : sh; };
+  function showTextEdit(top) {
+    if (!top || top.type === 'icon' || top.type === 'image') return;
+    let sh = top, idx = null, b;
+    if (top.type === 'group') {
+      idx = labelIndex(top);
+      if (idx < 0) return;
+      sh = top.children[idx];
+      b = placed(sh, top);
+    }
+    editing = { id: top.id, idx };
     editOrig = sh.text || '';
     const m = svg.getScreenCTM();
     const r = stage.getBoundingClientRect();
-    const b = sh.type === 'line' ? (() => { const [a, c] = ends(sh, shapes); return { x: (a.x + c.x) / 2 - 80, y: (a.y + c.y) / 2 - 20, w: 160, h: 40 }; })() : sh;
+    b ||= sh.type === 'line' ? (() => { const [a, c] = ends(sh, shapes); return { x: (a.x + c.x) / 2 - 80, y: (a.y + c.y) / 2 - 20, w: 160, h: 40 }; })() : sh;
     const p1 = new DOMPoint(b.x, b.y).matrixTransform(m), p2 = new DOMPoint(b.x + b.w, b.y + b.h).matrixTransform(m);
-    Object.assign(textEdit.style, { left: `${p1.x - r.left}px`, top: `${p1.y - r.top}px`, width: `${Math.max(120, p2.x - p1.x)}px`, height: `${Math.max(40, p2.y - p1.y)}px`, fontSize: `${(sh.fontSize || 14) / scale()}px`, textAlign: sh.align || 'center' });
+    Object.assign(textEdit.style, { left: `${p1.x - r.left}px`, top: `${p1.y - r.top}px`, width: `${Math.max(120, p2.x - p1.x)}px`, height: `${Math.max(40, p2.y - p1.y)}px`, fontSize: `${((b.fontSize || sh.fontSize) || 14) / scale()}px`, textAlign: sh.align || 'center' });
     textEdit.value = sh.text || '';
     textEdit.hidden = false;
     setTimeout(() => { textEdit.focus(); textEdit.select(); }, 0);
   }
   function hideTextEdit(save) {
     if (!editing) return;
-    const sh = byId(editing);
+    const sh = editObj();
     editing = null; textEdit.hidden = true;
     if (!sh) return;
     sh.text = save ? textEdit.value : editOrig;
@@ -487,7 +629,7 @@ export function createBoard(host, opts) {
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); hideTextEdit(true); }
     e.stopPropagation();
   });
-  textEdit.addEventListener('input', () => { const sh = byId(editing); if (sh) { sh.text = textEdit.value; render(); } });
+  textEdit.addEventListener('input', () => { const sh = editObj(); if (sh) { sh.text = textEdit.value; render(); } });
 
   /* ----- actions ----- */
   const selected = () => shapes.filter(x => sel.has(x.id));
@@ -502,6 +644,85 @@ export function createBoard(host, opts) {
     }
     sel = new Set(); render(); paintProps(); commit();
   }
+  function groupSelected() {
+    const list = selected();
+    if (list.length < 2) return;
+    const ids = new Set(list.map(x => x.id));
+    const at = shapes.findIndex(x => ids.has(x.id));
+    const g = makeGroup(list, shapes);
+    shapes = shapes.filter(x => !ids.has(x.id));
+    shapes.splice(Math.min(at, shapes.length), 0, g);
+    // connectors from outside keep following: they now attach to the group
+    for (const l of shapes) if (l.type === 'line') {
+      if (l.from && ids.has(l.from.id)) l.from = { id: g.id, anchor: l.from.anchor };
+      if (l.to && ids.has(l.to.id)) l.to = { id: g.id, anchor: l.to.anchor };
+    }
+    sel = new Set([g.id]); render(); paintProps(); commit();
+    toast('Grouped. It moves and resizes as one piece; save it to the library to reuse it.');
+  }
+  function ungroupSelected() {
+    const g = selected().find(x => x.type === 'group');
+    if (!g) return;
+    const kids = g.children.map(c => ({ ...placed(c, g), id: newId() }));
+    const bi = bodyIndex(g);
+    if (g.zone) (kids[bi >= 0 ? bi : 0]).zone = g.zone;
+    const at = shapes.indexOf(g);
+    shapes.splice(at, 1, ...kids);
+    for (const l of shapes) if (l.type === 'line') for (const end of ['from', 'to']) {
+      if (l[end]?.id !== g.id) continue;
+      if (bi >= 0) l[end] = { id: kids[bi].id, anchor: l[end].anchor };
+      else { const [a, b] = ends({ ...l }, [...shapes, g]); const p = end === 'from' ? a : b; l[end] = null; if (end === 'from') Object.assign(l, { x1: p.x, y1: p.y }); else Object.assign(l, { x2: p.x, y2: p.y }); }
+    }
+    sel = new Set(kids.map(k => k.id)); render(); paintProps(); commit();
+  }
+  /** A selection as a library entry: a group as it is, any other shapes wrapped into one. */
+  function asEntry(list, name) {
+    const g = list.length === 1 && list[0].type === 'group' ? list[0] : makeGroup(list, shapes);
+    return { id: newId(), name, w: g.w, h: g.h, cw: g.cw, ch: g.ch, children: clone(g.children), zone: g.zone || undefined };
+  }
+  async function saveToLibrary(name) {
+    const list = selected();
+    if (!list.length || !opts.library) return;
+    const entry = asEntry(list, name.trim() || 'Untitled shape');
+    if (list.length === 1 && list[0].type === 'group') { list[0].name = entry.name; commit(); }
+    await opts.library.save(entry);
+    paintProps();
+  }
+  function insertEntry(item) {
+    addShape({ type: 'group', name: item.name, w: item.w, h: item.h, cw: item.cw || item.w, ch: item.ch || item.h, children: clone(item.children).map(c => ({ ...c, id: newId() })), ...(item.zone ? { zone: item.zone } : {}) });
+  }
+  function preview(item) {
+    const pad = 6;
+    const g = { id: 'pv', type: 'group', x: 0, y: 0, w: item.w, h: item.h, cw: item.cw || item.w, ch: item.ch || item.h, children: item.children };
+    const v = s('svg', { viewBox: `${-pad} ${-pad} ${item.w + pad * 2} ${item.h + pad * 2}`, class: 'bd-lib-pv', 'aria-hidden': 'true' });
+    v.append(drawShape(g, [], {}));
+    return v;
+  }
+  function pickLibrary(anchorBtn) {
+    const lib = opts.library;
+    const items = lib.items();
+    const pop = h('div', { class: 'bd-pop bd-lib', role: 'dialog', 'aria-label': 'Shape library' });
+    const close = () => { pop.remove(); document.removeEventListener('pointerdown', outside, true); };
+    const outside = (e) => { if (!pop.contains(e.target) && !anchorBtn.contains(e.target)) close(); };
+    const groups = [['Your team’s shapes', items.filter(i => !i.builtin)], ['K3 line machines', items.filter(i => i.builtin)]];
+    clear(pop,
+      h('div', { class: 'bd-lib-head' }, icon('shapes'), h('strong', { text: 'Shape library' }),
+        h('span', { class: 'muted small', text: 'Tap to add. Select a group, then Save in its panel, to add yours.' })),
+      groups.map(([title, list]) => (list.length || title.startsWith('Your') ? [
+        h('div', { class: 'bd-lib-title', text: title }),
+        list.length ? h('div', { class: 'bd-lib-grid' }, list.map(item => h('div', { class: 'bd-lib-item' },
+          h('button', { type: 'button', class: 'bd-lib-btn', title: `Add ${item.name}`, 'aria-label': `Add ${item.name}`, onclick: () => { close(); insertEntry(item); } },
+            preview(item), h('span', { class: 'bd-lib-name', text: item.name }),
+            item.by ? h('span', { class: 'bd-lib-by', text: item.by }) : null),
+          !item.builtin && lib.remove ? h('button', { type: 'button', class: 'icon-btn small bd-lib-del', title: `Remove ${item.name} from the library`, 'aria-label': `Remove ${item.name}`, onclick: async () => { if (await lib.remove(item)) { close(); pickLibrary(anchorBtn); } } }, icon('trash')) : null)))
+          : h('p', { class: 'muted small bd-lib-empty', text: 'Nothing saved yet. Group some shapes (select them, then Group), and save the group here: everyone on your team can then use it.' }),
+      ] : null)));
+    root.append(pop);
+    const r = anchorBtn.getBoundingClientRect(), rr = root.getBoundingClientRect();
+    pop.style.left = `${Math.max(0, Math.min(rr.width - Math.min(rr.width, 420), r.left - rr.left))}px`;
+    pop.style.top = `${r.bottom - rr.top + 6}px`;
+    setTimeout(() => document.addEventListener('pointerdown', outside, true), 0);
+  }
   function duplicate(list = selected(), offset = 24) {
     const map = new Map();
     const copies = list.map(sh => { const c = clone(sh); c.id = newId(); map.set(sh.id, c.id); return c; });
@@ -513,6 +734,7 @@ export function createBoard(host, opts) {
         const [a, b] = ends(src, shapes);
         if (!c.from) { c.x1 = a.x + offset; c.y1 = a.y + offset; }
         if (!c.to) { c.x2 = b.x + offset; c.y2 = b.y + offset; }
+        if (c.via) c.via = c.via.map(q => ({ x: q.x + offset, y: q.y + offset }));
       } else { c.x += offset; c.y += offset; }
     }
     shapes.push(...copies); sel = new Set(copies.map(c => c.id)); render(); paintProps(); commit();
@@ -596,6 +818,7 @@ export function createBoard(host, opts) {
     if (mod && e.key.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) redoIt(); else undoIt(); return; }
     if (mod && e.key.toLowerCase() === 'y') { e.preventDefault(); redoIt(); return; }
     if (mod && e.key.toLowerCase() === 'd') { e.preventDefault(); duplicate(); return; }
+    if (mod && e.key.toLowerCase() === 'g') { e.preventDefault(); if (e.shiftKey) ungroupSelected(); else groupSelected(); return; }
     if (mod && e.key.toLowerCase() === 'a') { e.preventDefault(); sel = new Set(shapes.map(x => x.id)); render(); paintProps(); return; }
     if (mod && e.key.toLowerCase() === 'c') { if (sel.size) { clipboard = clone(selected()); } return; }
     if (e.key === 'Delete' || e.key === 'Backspace') { if (sel.size) { e.preventDefault(); remove(); } return; }
@@ -606,7 +829,7 @@ export function createBoard(host, opts) {
       const step = e.shiftKey ? 10 : 1;
       const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
       const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
-      update(sh => { if (sh.type === 'line') { if (!sh.from) { sh.x1 += dx; sh.y1 += dy; } if (!sh.to) { sh.x2 += dx; sh.y2 += dy; } } else { sh.x += dx; sh.y += dy; } });
+      update(sh => { if (sh.type === 'line') { if (!sh.from) { sh.x1 += dx; sh.y1 += dy; } if (!sh.to) { sh.x2 += dx; sh.y2 += dy; } if (sh.via) sh.via = sh.via.map(q => ({ x: q.x + dx, y: q.y + dy })); } else { sh.x += dx; sh.y += dy; } });
       return;
     }
     if (!mod && !e.altKey) {
@@ -666,7 +889,8 @@ export function createBoard(host, opts) {
       }, ico.cloneNode(true)))),
       h('div', { class: 'bd-group' },
         h('button', { type: 'button', class: 'bd-tool', title: 'Add an image (or paste one)', 'aria-label': 'Add an image', onclick: pickImage }, icon('upload')),
-        (() => { const b = h('button', { type: 'button', class: 'bd-tool', title: 'Add an icon', 'aria-label': 'Add an icon' }, icon('zap')); b.addEventListener('click', () => pickIcon(b)); return b; })()),
+        (() => { const b = h('button', { type: 'button', class: 'bd-tool', title: 'Add an icon', 'aria-label': 'Add an icon' }, icon('zap')); b.addEventListener('click', () => pickIcon(b)); return b; })(),
+        opts.library ? (() => { const b = h('button', { type: 'button', class: 'bd-tool bd-lib-tool', title: 'Shape library: machines and your team’s saved shapes', 'aria-label': 'Shape library' }, icon('shapes'), h('span', { class: 'bd-tool-t', text: 'Library' })); b.addEventListener('click', () => pickLibrary(b)); return b; })() : null),
       h('div', { class: 'bd-group' },
         h('button', { type: 'button', class: 'bd-tool', title: 'Undo (Ctrl/Cmd+Z)', 'aria-label': 'Undo', onclick: undoIt }, toolIcon('M9 14L4 9l5-5M4 9h11a5 5 0 0 1 0 10h-3')),
         h('button', { type: 'button', class: 'bd-tool', title: 'Redo', 'aria-label': 'Redo', onclick: redoIt }, toolIcon('M15 14l5-5-5-5M20 9H9a5 5 0 0 0 0 10h3'))),
@@ -700,52 +924,68 @@ export function createBoard(host, opts) {
     if (!list.length) {
       clear(props, h('div', { class: 'bd-props-empty' },
         h('p', { class: 'muted small' }, icon('info'), ' Pick a tool and drag on the canvas. Lines and arrows snap to the dots on a shape and follow it when it moves. Double-tap a shape to type in it. Paste an image or text straight in.'),
+        h('p', { class: 'muted small', text: 'Select several shapes and Group them to make one piece, like a machine; save a group to the Library so your team can reuse it. Drag the small square in the middle of a line to bend it.' }),
         h('p', { class: 'muted small', text: 'Two fingers (or the hand tool) to pan; pinch or Ctrl + scroll to zoom. Shift keeps proportions.' })));
       return;
     }
     const sh = list[0];
     const isLine = list.every(x => x.type === 'line');
-    const hasText = list.some(x => x.type !== 'icon' && x.type !== 'image');
+    const isGroup = list.length === 1 && sh.type === 'group';
+    const body = targetsOf(sh, 'body')[0] || sh;
+    const label = targetsOf(sh, 'label')[0] || null;
+    const hasText = list.some(x => x.type !== 'icon' && x.type !== 'image' && (x.type !== 'group' || labelIndex(x) >= 0));
+    // style changes reach inside groups: fill and border to the body, text to the label
+    const each = (role, fn) => update(x => targetsOf(x, role).forEach(fn));
     const ta = h('textarea', { rows: '2', class: 'bd-ta', 'aria-label': 'Text' });
-    ta.value = sh.text || '';
-    ta.addEventListener('change', () => update(x => { if (x.type !== 'icon' && x.type !== 'image') x.text = ta.value; }));
+    ta.value = (isGroup ? label?.text : sh.text) || '';
+    ta.addEventListener('change', () => each('label', x => { if (x.type !== 'icon' && x.type !== 'image') x.text = ta.value; }));
     const zoneSel = opts.zones ? h('select', { 'aria-label': 'Linked zone' },
       h('option', { value: '', text: 'Not linked' }),
       opts.zones.map(z => h('option', { value: z, selected: sh.zone === z, text: z }))) : null;
-    zoneSel?.addEventListener('change', () => update(x => { if (x.type !== 'line' || true) { if (zoneSel.value) x.zone = zoneSel.value; else delete x.zone; } }));
+    zoneSel?.addEventListener('change', () => update(x => { if (zoneSel.value) x.zone = zoneSel.value; else delete x.zone; }));
+    const libName = h('input', { type: 'text', class: 'bd-lib-in', placeholder: 'Name, e.g. Filler', 'aria-label': 'Name in the library', maxlength: '60', value: sh.name || sh.zone || '' });
+    const canGroup = list.length > 1;
     clear(props,
       h('div', { class: 'bd-props-head' }, h('strong', { text: list.length > 1 ? `${list.length} selected` : labelOf(sh) }),
         h('div', { class: 'row-gap' },
+          canGroup ? h('button', { type: 'button', class: 'icon-btn small', title: 'Group (Ctrl/Cmd+G)', 'aria-label': 'Group', onclick: groupSelected }, icon('group')) : null,
+          isGroup ? h('button', { type: 'button', class: 'icon-btn small', title: 'Ungroup (Ctrl/Cmd+Shift+G)', 'aria-label': 'Ungroup', onclick: ungroupSelected }, icon('ungroup')) : null,
           h('button', { type: 'button', class: 'icon-btn small', title: 'Duplicate (Ctrl/Cmd+D)', 'aria-label': 'Duplicate', onclick: () => duplicate() }, icon('copy')),
           h('button', { type: 'button', class: 'icon-btn small', title: 'Bring to front', 'aria-label': 'Bring to front', onclick: () => arrange(true) }, toolIcon('M8 8h12v12H8zM4 4h12v2M4 4v12h2')),
           h('button', { type: 'button', class: 'icon-btn small', title: 'Send to back', 'aria-label': 'Send to back', onclick: () => arrange(false) }, toolIcon('M4 4h12v12H4zM20 8v12H8v-2')),
           h('button', { type: 'button', class: 'icon-btn small danger', title: 'Delete', 'aria-label': 'Delete', onclick: remove }, icon('trash')))),
+      canGroup ? h('button', { type: 'button', class: 'btn ghost small bd-group-btn', onclick: groupSelected }, icon('group'), `Group these ${list.length} into one piece`) : null,
       list.length > 1 && list.some(x => x.type !== 'line') ? row('Align', h('div', { class: 'row-gap' },
         [['left', 'M4 4v16M8 7h12M8 12h8M8 17h10'], ['center', 'M12 4v16M6 7h12M8 12h8M7 17h10'], ['right', 'M20 4v16M4 7h12M8 12h8M6 17h10'],
           ['top', 'M4 4h16M7 8v12M12 8v8M17 8v10'], ['middle', 'M4 12h16M7 6v12M12 8v8M17 7v10'], ['bottom', 'M4 20h16M7 4v12M12 8v8M17 6v10']]
           .map(([k, d]) => h('button', { type: 'button', class: 'icon-btn small', title: `Align ${k}`, 'aria-label': `Align ${k}`, onclick: () => align(k) }, toolIcon(d))))) : null,
-      !isLine && sh.type !== 'icon' && sh.type !== 'image' ? row('Fill', swatchRow(sh.fill ?? 'none', (v) => { lastFill = v; update(x => { if (x.type !== 'line') x.fill = v; }); }, { none: true, auto: !!opts.zones })) : null,
-      row(sh.type === 'icon' ? 'Colour' : isLine ? 'Line' : 'Border', swatchRow(sh.stroke ?? '#141414', (v) => { lastStroke = v; update(x => { x.stroke = v; if (!x.strokeWidth && x.type !== 'text') x.strokeWidth = 2; }); })),
-      row('Thickness', seg([[0, '0'], [1, '1'], [2, '2'], [4, '4'], [6, '6'], [10, '10']], sh.strokeWidth ?? 2, (v) => update(x => { x.strokeWidth = v; }))),
-      sh.type !== 'icon' && sh.type !== 'image' ? row('Style', seg([['solid', 'Solid'], ['dashed', 'Dashed'], ['dotted', 'Dotted']], sh.dash || 'solid', (v) => update(x => { x.dash = v; }))) : null,
+      opts.library && !isLine && (isGroup || list.length > 1 || sh.type !== 'line') ? row('Library', h('div', { class: 'bd-lib-save' }, libName,
+        h('button', { type: 'button', class: 'btn small', onclick: () => saveToLibrary(libName.value) }, icon('save'), 'Save')),
+        h('span', { class: 'muted small', text: isGroup ? 'Saved shapes appear in the Library for everyone on your team.' : 'Saved as one piece in the Library for everyone on your team.' })) : null,
+      !isLine && body.type !== 'icon' && body.type !== 'image' ? row('Fill', swatchRow(body.fill ?? 'none', (v) => { lastFill = v; each('body', x => { if (x.type !== 'line') x.fill = v; }); }, { none: true, auto: !!opts.zones })) : null,
+      row(sh.type === 'icon' ? 'Colour' : isLine ? 'Line' : 'Border', swatchRow(body.stroke ?? '#141414', (v) => { lastStroke = v; each('body', x => { x.stroke = v; if (!x.strokeWidth && x.type !== 'text') x.strokeWidth = 2; }); })),
+      row('Thickness', seg([[0, '0'], [1, '1'], [2, '2'], [4, '4'], [6, '6'], [10, '10'], ...(isLine ? [[16, '16']] : [])], body.strokeWidth ?? 2, (v) => each('body', x => { x.strokeWidth = v; }))),
+      body.type !== 'icon' && body.type !== 'image' ? row('Style', seg([['solid', 'Solid'], ['dashed', 'Dashed'], ['dotted', 'Dotted'], ...(isLine ? [['belt', 'Conveyor']] : [])], body.dash || 'solid',
+        (v) => each('body', x => { x.dash = v; if (v === 'belt' && x.type === 'line' && (x.strokeWidth ?? 2) < 10) { x.strokeWidth = 16; if (x.stroke === '#141414') x.stroke = '#DCDCD8'; } }))) : null,
       isLine ? [
         row('Ends', seg([['none', 'None'], ['end', '→'], ['both', '↔']], sh.arrowStart && sh.arrowEnd ? 'both' : sh.arrowEnd ? 'end' : 'none', (v) => update(x => { x.arrowEnd = v !== 'none'; x.arrowStart = v === 'both'; }))),
-        row('Route', seg([['straight', 'Straight'], ['elbow', 'Elbow']], sh.route || 'straight', (v) => update(x => { x.route = v; }))),
+        row('Route', seg([['straight', 'Straight'], ['elbow', 'Elbow']], sh.route || 'straight', (v) => update(x => { x.route = v; if (v === 'elbow') delete x.via; })),
+          sh.via?.length ? h('button', { type: 'button', class: 'link-btn small', onclick: () => update(x => { delete x.via; }) }, icon('close'), 'Remove bends') : null),
       ] : null,
-      sh.type === 'rect' || sh.type === 'image' ? row('Corners', range(0, 60, 2, sh.radius ?? 0, (v) => update(x => { x.radius = v; }))) : null,
+      body.type === 'rect' || body.type === 'image' ? row('Corners', range(0, 60, 2, body.radius ?? 0, (v) => each('body', x => { x.radius = v; }))) : null,
       hasText ? [
         row('Text', ta),
-        row('Text colour', swatchRow(sh.textColor || '#141414', (v) => update(x => { x.textColor = v; }))),
-        row('Size', range(9, 64, 1, sh.fontSize || 14, (v) => update(x => { x.fontSize = v; })),
-          h('button', { type: 'button', class: 'icon-btn small' + (sh.bold ? ' on' : ''), title: 'Bold', 'aria-label': 'Bold', onclick: () => update(x => { x.bold = !sh.bold; }) }, h('strong', { text: 'B' }))),
-        !isLine ? row('Align', seg([['left', 'Left'], ['center', 'Centre'], ['right', 'Right']], sh.align || 'center', (v) => update(x => { x.align = v; })),
-          seg([['top', 'Top'], ['middle', 'Mid'], ['bottom', 'Bottom']], sh.valign || 'middle', (v) => update(x => { x.valign = v; }))) : null,
+        row('Text colour', swatchRow((label || sh).textColor || '#141414', (v) => each('label', x => { x.textColor = v; }))),
+        row('Size', range(9, 64, 1, Math.round((label || sh).fontSize || 14), (v) => each('label', x => { x.fontSize = v; })),
+          h('button', { type: 'button', class: 'icon-btn small' + ((label || sh).bold ? ' on' : ''), title: 'Bold', 'aria-label': 'Bold', onclick: () => each('label', x => { x.bold = !(label || sh).bold; }) }, h('strong', { text: 'B' }))),
+        !isLine ? row('Align', seg([['left', 'Left'], ['center', 'Centre'], ['right', 'Right']], (label || sh).align || 'center', (v) => each('label', x => { x.align = v; })),
+          seg([['top', 'Top'], ['middle', 'Mid'], ['bottom', 'Bottom']], (label || sh).valign || 'middle', (v) => each('label', x => { x.valign = v; }))) : null,
       ] : null,
       row('Opacity', range(0.1, 1, 0.05, sh.opacity ?? 1, (v) => update(x => { x.opacity = v; }))),
       zoneSel ? row('Zone link', zoneSel, h('span', { class: 'muted small', text: 'Tapping it in the Guide opens that zone.' })) : null,
       isLine && (sh.from || sh.to) ? h('button', { type: 'button', class: 'link-btn small', onclick: () => update(x => { if (x.type === 'line') { const [a, b] = ends(x, shapes); Object.assign(x, { x1: a.x, y1: a.y, x2: b.x, y2: b.y, from: null, to: null }); } }) }, icon('close'), 'Detach from shapes') : null);
   }
-  const labelOf = (sh) => ({ rect: 'Rectangle', ellipse: 'Ellipse', triangle: 'Triangle', diamond: 'Diamond', hopper: 'Hopper', text: 'Text', line: sh.arrowEnd ? 'Arrow' : 'Line', image: 'Image', icon: 'Icon' })[sh.type] + (sh.zone ? ` · ${sh.zone}` : '');
+  const labelOf = (sh) => (sh.type === 'group' ? (sh.name || 'Group') : ({ rect: 'Rectangle', ellipse: 'Ellipse', triangle: 'Triangle', diamond: 'Diamond', hopper: 'Hopper', text: 'Text', line: sh.dash === 'belt' ? 'Conveyor' : sh.arrowEnd ? 'Arrow' : 'Line', image: 'Image', icon: 'Icon', path: 'Drawing' })[sh.type]) + (sh.zone && sh.zone !== sh.name ? ` · ${sh.zone}` : '');
 
   /* ----- export ----- */
   function svgString({ pad = 20 } = {}) {

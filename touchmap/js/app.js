@@ -8,7 +8,11 @@ import { renderReport } from './report.js';
 import { renderGuide } from './guide.js';
 import { renderSetup } from './setup.js';
 import { renderDiagramEditor } from './diagram.js';
-import { closeModal } from './ui.js';
+import { renderLogin, renderWelcome, rememberDestination, landing } from './onboard.js';
+import { renderAdmin } from './admin.js';
+import { session, isAdmin } from './auth.js';
+import { state } from './store.js';
+import { closeModal, toast } from './ui.js';
 import { startSync, onSync } from './sync.js';
 import { paintSyncPill, handleJoin } from './sync-ui.js';
 import { onWatch } from './stopwatch.js';
@@ -24,9 +28,29 @@ const ROUTES = {
   guide: (el) => renderGuide(el),
   setup: (el) => renderSetup(el, { onChange: paintChrome }),
   diagram: (el) => renderDiagramEditor(el),
+  admin: (el) => renderAdmin(el),
+  login: (el) => renderLogin(el, { onDone: () => { ensureSync(); go(state.profile?.at || isAdmin() ? landing() : '#welcome'); } }),
+  welcome: (el) => renderWelcome(el, { onDone: (p) => { toast(`Welcome, ${p.name}. Mapping ${p.plantName} · ${p.lineCustom ? p.lineName : p.line}.`); go(landing()); } }),
 };
 // Tabs a route belongs under, for the highlight.
 const TAB_OF = { report: 'run', diagram: 'guide' };
+// Full-screen pages without the app's bars.
+const GATES = new Set(['login', 'welcome']);
+
+function go(hash) {
+  if (location.hash === hash) route(); else location.hash = hash;
+}
+let syncStarted = false;
+function ensureSync() { if (!syncStarted) { syncStarted = true; startSync(); } }
+
+/** Signed in, and set up (plant and name) before anything else; Admin for admins only. */
+function gate(r) {
+  if (!session()) return 'login';
+  if (r === 'login') return isAdmin() || state.profile?.at ? 'capture' : 'welcome';
+  if (r === 'admin' && !isAdmin()) return 'capture';
+  if (!isAdmin() && !state.profile?.at) return 'welcome';
+  return r;
+}
 
 const view = document.getElementById('view');
 let cleanup = null;
@@ -46,6 +70,7 @@ function paintChrome() {
   document.getElementById('live-dot').hidden = !timer.running();
   const r = current();
   const tab = TAB_OF[r] || r;
+  document.getElementById('admin-link').hidden = !isAdmin();
   for (const a of document.querySelectorAll('[data-route]')) {
     const on = a.dataset.route === tab;
     a.classList.toggle('on', on);
@@ -54,7 +79,8 @@ function paintChrome() {
 }
 
 function route() {
-  if (location.hash.startsWith('#join=')) {
+  if (!session()) rememberDestination(location.hash);
+  if (location.hash.startsWith('#join=') && session()) {
     const params = new URLSearchParams(location.hash.slice(1));
     handleJoin(params).then(() => paintChrome());
     return renderRoute();
@@ -67,11 +93,14 @@ function renderRoute({ keepScroll = false } = {}) {
   const y = window.scrollY;
   if (typeof cleanup === 'function') cleanup();
   cleanup = null;
-  const r = current();
+  const asked = current();
+  const r = gate(asked);
+  if (r !== asked && !GATES.has(r)) { location.replace('#' + r); return; }
   document.body.dataset.route = r;
+  document.body.classList.toggle('gated', GATES.has(r));
   cleanup = ROUTES[r](view) || null;
-  showMinibar(r !== 'capture');
-  paintChrome();
+  showMinibar(!GATES.has(r) && r !== 'capture' && r !== 'admin');
+  if (!GATES.has(r)) paintChrome();
   window.scrollTo(0, keepScroll ? y : 0);
 }
 
@@ -81,9 +110,10 @@ onSync((changed) => {
   paintChrome();
   if (!changed) return;
   const r = current();
+  if (GATES.has(document.body.dataset.route)) return;
   const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || '');
   const modal = document.getElementById('modal').open;
-  if (r === 'log' || r === 'analysis' || r === 'report' || ((r === 'run' || r === 'setup' || r === 'guide') && !typing && !modal)) renderRoute({ keepScroll: true });
+  if (r === 'log' || r === 'analysis' || r === 'report' || ((r === 'run' || r === 'setup' || r === 'guide' || r === 'admin') && !typing && !modal)) renderRoute({ keepScroll: true });
 });
 
 // Saving or undoing from the stopwatch bar changes the log and the counts.
@@ -95,12 +125,12 @@ onWatch((evt) => {
 });
 
 window.addEventListener('hashchange', route);
-window.addEventListener('storage', (e) => { if (e.key === 'touchmap:v1') location.reload(); });
+window.addEventListener('storage', (e) => { if (e.key === 'touchmap:v1' || e.key === 'touchmap:session') location.reload(); });
 setInterval(() => { document.getElementById('live-dot').hidden = !timer.running(); }, 1000);
 
 initMinibar();
 route();
-startSync();
+if (session()) ensureSync();
 
 // Warn before closing the tab mid-touch (the timer would survive, but say so).
 window.addEventListener('beforeunload', (e) => {

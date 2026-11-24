@@ -7,6 +7,7 @@ import { syncCard } from './sync-ui.js';
 import { ZONE_KEYS } from './linemap.js';
 import { h, clear, icon, toast, openModal, closeModal, confirmBox, deliverFile, pickFile, fmt, stamp, group } from './ui.js';
 import { DEFAULT_COLORS, SWATCHES, applyColors, resolveColors, textOn } from './colors.js';
+import { session, signOut } from './auth.js';
 
 /** Change the framework in use, save it as the team's custom framework, and share it. */
 function editFramework(mutate) {
@@ -235,6 +236,8 @@ export function renderSetup(root, { onChange } = {}) {
       h('h1', { class: 'view-title' }, icon('gear', 'title-ico'), 'Setup'),
       h('p', { class: 'view-sub', text: 'Touches, zones and people for the whole team; sync and data for this device.' }))),
 
+    profileGroup(),
+
     group('setup-touches', 'Touch types', 'layers', { open: true, badge: custom ? 'customised' : 'default' },
       h('div', { class: 'row-gap fw-status' },
         h('span', { class: 'pill ' + (custom ? 'new' : 'ok') }, icon(custom ? 'edit' : 'check'), custom ? `Customised ${state.setupUpdatedAt ? fmt.ago(state.setupUpdatedAt) : ''}` : 'Default (the K3 template)'),
@@ -268,4 +271,28 @@ export function renderSetup(root, { onChange } = {}) {
         h('button', { type: 'button', class: 'btn ghost', onclick: exportSetup }, icon('download'), 'Export setup'),
         h('button', { type: 'button', class: 'btn ghost', onclick: importSetup }, icon('upload'), 'Import setup')),
       h('p', { class: 'muted small', text: 'The demo run stays on this device and never reaches the team sheet.' }))));
+}
+
+/** Who is signed in on this device, where they map, and sign out. */
+function profileGroup() {
+  const p = state.profile;
+  const admin = session()?.role === 'admin';
+  const fact = (ico, label, value) => h('div', { class: 'pf-fact' }, h('span', { class: 'pf-ico' }, icon(ico)), h('span', {}, h('span', { class: 'muted small', text: label }), h('strong', { text: value || '–' })));
+  const out = async () => {
+    const ok = await confirmBox({ title: 'Sign out of Touch Map?', body: 'Your touches stay on this device and in the team log. Sign in again with the shared login to carry on.', ok: 'Sign out' });
+    if (!ok) return;
+    signOut();
+    location.hash = '#login';
+    location.reload();
+  };
+  return group('setup-profile', 'Your profile', 'user', { open: true, badge: admin ? 'admin' : null },
+    h('div', { class: 'pf-facts' },
+      fact('user', 'Name', p?.name),
+      fact('globe', 'Business unit', p?.buName),
+      fact('factory', 'Plant', p?.plantName),
+      fact('line', 'Production line', p?.lineName)),
+    h('div', { class: 'row-gap' },
+      h('a', { class: 'btn ghost', href: '#welcome' }, icon('edit'), p ? 'Change plant, line or name' : 'Set up your profile'),
+      admin ? h('a', { class: 'btn ghost', href: '#admin' }, icon('shield'), 'Admin: all plants') : null,
+      h('button', { type: 'button', class: 'btn ghost', onclick: out }, icon('logout'), 'Sign out')));
 }

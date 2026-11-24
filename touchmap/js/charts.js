@@ -12,9 +12,8 @@ export const KINDS = {
   bars: { label: 'Bars', path: 'M4 6h12M4 12h16M4 18h8' },
   columns: { label: 'Columns (histogram)', path: 'M6 20V10M12 20V4M18 20v-7M3 20h18' },
   donut: { label: 'Donut', path: 'M12 3a9 9 0 1 0 9 9h-5a4 4 0 1 1-4-4z' },
-  pareto: { label: 'Pareto: columns + cumulative % line', path: 'M5 20V9M10 20v-7M15 20v-4M3 20h18M4 10l6-3 5-2 6-1' },
+  pareto: { label: 'Pareto: biggest first', path: 'M4 5h16M4 10h12M4 15h8M4 20h4' },
   line: { label: 'Line', path: 'M3 17l6-6 4 4 8-8' },
-  combo: { label: 'Columns + cumulative % line', path: 'M6 20v-6M12 20V9M18 20v-9M3 20h18M3 13l6-4 6-3 6-2' },
   table: { label: 'Table', path: 'M4 5h16v14H4zM4 10h16M4 15h16M10 5v14' },
 };
 
@@ -45,16 +44,13 @@ export function hbars(items, ctx, { highlight = () => false } = {}) {
   }));
 }
 
-/* ---------- columns, stacked columns, with an optional % line ---------- */
-/**
- * cols: [{ key, label, segs: [{ value, colour, label }], rest }]
- * line: { values: [0..1 per column], label } plotted on its own 0–100% axis, with an 80% mark.
- */
-export function columns(cols, ctx, { line = null, unit = 'min', mark80 = false, xRotate = false } = {}) {
+/* ---------- columns and stacked columns ---------- */
+/** cols: [{ key, label, short, segs: [{ value, colour, label }], rest }] */
+export function columns(cols, ctx, { unit = 'min', xRotate = false } = {}) {
   const totals = cols.map(c => c.segs.reduce((s, g) => s + g.value, 0));
   const top = niceMax(Math.max(...totals, 0));
   const peak = totals.indexOf(Math.max(...totals));
-  const plot = h('div', { class: 'cc-plot' + (line ? ' has-line' : '') });
+  const plot = h('div', { class: 'cc-plot' });
   const grid = h('div', { class: 'cc-grid' }, [1, 0.5, 0].map(() => h('span')));
   const colsEl = h('div', { class: 'cc-cols' }, cols.map((c, idx) => {
     const tot = totals[idx];
@@ -63,38 +59,32 @@ export function columns(cols, ctx, { line = null, unit = 'min', mark80 = false, 
         idx === peak && tot > 0 ? h('span', { class: 'cc-val', style: { bottom: `calc(${(tot / top) * 100}% + 4px)` }, text: fmtMin(tot) }) : null,
         c.segs.filter(g => g.value > 0).map(g => h('div', { class: 'cc-seg', style: { height: `${(g.value / top) * 100}%`, background: g.colour } }))),
       h('span', { class: 'cc-x' + (xRotate ? ' rot' : ''), title: c.label, text: c.short || c.label }));
-    const rest = [c.label, ...c.segs.filter(g => g.value > 0 && g.label).map(g => `${g.label} ${fmtMin(g.value)} ${unit}`), ...(c.rest || []), ...(line ? [`${line.label}: ${fmt.pct(line.values[idx])}`] : [])];
+    const rest = [c.label, ...c.segs.filter(g => g.value > 0 && g.label).map(g => `${g.label} ${fmtMin(g.value)} ${unit}`), ...(c.rest || [])];
     return ctx.tip(col, `${fmtMin(tot)} ${unit}`, rest, c.key && ctx.pick && tot > 0 ? () => ctx.pick(c.key) : null, `${c.label}: ${fmtMin(tot)} ${unit}`);
   }));
   plot.append(grid, colsEl);
-  if (line && cols.length) {
-    const n = cols.length;
-    const xs = cols.map((_, i) => ((i + 0.5) / n) * 100);
-    const svg = svgEl('svg', { class: 'cc-line', viewBox: '0 0 100 100', preserveAspectRatio: 'none', 'aria-hidden': 'true' });
-    if (mark80) svg.append(svgEl('line', { x1: 0, x2: 100, y1: 20, y2: 20, class: 'cc-ref', 'vector-effect': 'non-scaling-stroke' }));
-    svg.append(svgEl('polyline', { points: line.values.map((v, i) => `${xs[i]},${100 - (v ?? 0) * 100}`).join(' '), class: 'cc-poly', 'vector-effect': 'non-scaling-stroke' }));
-    plot.append(svg);
-    const last = line.values[line.values.length - 1];
-    plot.append(h('div', { class: 'cc-dots' },
-      line.values.map((v, i) => h('span', { class: 'cc-dot', style: { left: `${xs[i]}%`, bottom: `${(v ?? 0) * 100}%` } })),
-      h('span', { class: 'cc-end', style: { bottom: `calc(${(last ?? 0) * 100}% + 8px)` }, text: fmt.pct(last) }),
-      mark80 ? h('span', { class: 'cc-ref-l', text: '80%' }) : null));
-  }
-  return h('div', { class: 'cc' + (line ? ' with-line' : '') },
+  return h('div', { class: 'cc' },
     h('div', { class: 'cc-y' }, [top, top / 2, 0].map(t => h('span', { text: fmtMin(t) }))),
-    plot,
-    line ? h('div', { class: 'cc-y right' }, ['100%', '50%', '0%'].map(t => h('span', { text: t }))) : null,
-    line ? h('div', { class: 'cc-axis-note' }, h('span', { class: 'cc-key-col' }), `${unit === 'min' ? 'Minutes' : unit} (left)`, h('span', { class: 'cc-key-line' }), `${line.label} (right)`) : null);
+    plot);
 }
 
-/** Categories as columns, largest first, with the running share as a line. */
-export function pareto(items, ctx) {
+/**
+ * Pareto as the Analysis sheet had it: bars biggest first, the top three marked, the running
+ * share in each bar's details and in the table underneath.
+ */
+export function pareto(items, ctx, { top = 3, label = 'Item' } = {}) {
   const sorted = [...items].filter(i => i.value > 0).sort((a, b) => b.value - a.value);
   const sum = sorted.reduce((s, i) => s + i.value, 0);
   let run = 0;
-  const cum = sorted.map(i => { run += i.value; return sum ? run / sum : 0; });
-  return columns(sorted.map(i => ({ key: i.key, label: i.label, short: i.short || i.label, segs: [{ value: i.value, colour: i.colour }], rest: i.rest })), ctx,
-    { line: { values: cum, label: 'Cumulative %' }, mark80: true, xRotate: sorted.length > 6 });
+  const ranked = sorted.map((i, n) => {
+    run += i.value;
+    const cum = sum ? run / sum : 0;
+    return { ...i, rest: [...(i.rest || []).filter(r => !/^cumulative /.test(r)), `#${n + 1} · cumulative ${fmt.pct(cum)}`] };
+  });
+  const keys = new Set(ranked.slice(0, top).map(i => i.key));
+  return h('div', { class: 'pareto' },
+    hbars(ranked, ctx, { highlight: i => keys.has(i.key) }),
+    h('details', { class: 'tbl-wrap' }, h('summary', { text: 'Table with the cumulative share' }), table(sorted, { label, cum: true })));
 }
 
 /** Categories as plain columns, in the order given. */
