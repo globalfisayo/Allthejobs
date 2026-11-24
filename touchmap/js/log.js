@@ -1,7 +1,8 @@
 // The observation log: every touch, newest first, tap to edit.
 import { CAT_BY_CODE } from './framework.js';
 import { finalise, missingFields, ordered, totalMinutes, perOccurrence, fmtMin, FIELD_LABEL, blankTouch } from './model.js';
-import { state, save, activeRun, markTouch, removeTouch, restoreTouch } from './store.js';
+import { state, save, activeRun, markTouch, removeTouch, restoreTouch, peopleFor } from './store.js';
+import { registerEditor } from './stopwatch.js';
 import { touchForm } from './form.js';
 import { swipeable } from './swipe.js';
 import { h, clear, icon, toast, openModal, closeModal, fmt } from './ui.js';
@@ -110,7 +111,7 @@ export function openEditor(id, onDone) {
   if (idx < 0) return;
   const original = run.touches[idx];
   const model = { ...original };
-  const form = touchForm(model, { lists: state.lists, onChange: () => {} });
+  const form = touchForm(model, { lists: state.lists, people: peopleFor(run), onChange: () => {} });
   const num = ordered(run.touches).findIndex(t => t.id === id) + 1;
 
   const timing = original.timedSec != null
@@ -150,3 +151,5 @@ export function openEditor(id, onDone) {
       h('button', { type: 'button', class: 'btn primary', onclick: doSave }, icon('check'), 'Save changes'))),
   { label: `Edit touch #${num}`, wide: true });
 }
+
+registerEditor(openEditor);

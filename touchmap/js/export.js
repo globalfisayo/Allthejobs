@@ -1,6 +1,6 @@
 // Builds the workbook, CSV and JSON backup from a run. No DOM: shared with the tests.
 import { CAT_BY_CODE, LOG_COLUMNS, CATEGORIES } from './framework.js';
-import { ordered, perOccurrence, totalMinutes, round, referenceCapacity } from './model.js';
+import { ordered, perOccurrence, totalMinutes, round, referenceCapacity, runCapacity, observedMinutes } from './model.js';
 import { analyse } from './analysis.js';
 import { buildXlsx, S } from './xlsx.js';
 
@@ -52,7 +52,9 @@ export function workbookSheets(run, lists) {
   ];
 
   const info = run.info;
-  const { available, capacity } = referenceCapacity(info);
+  const { available } = referenceCapacity(info);
+  const capacity = runCapacity(run);
+  const obs = observedMinutes(run);
   const runInfo = [
     [{ v: 'Run Info & Reference Frame', s: S.title }],
     [{ v: run.name, s: S.bold }],
@@ -61,6 +63,9 @@ export function workbookSheets(run, lists) {
     ['Observation window (from)', info.from], ['Observation window (to)', info.to],
     ['Formats / SKUs observed', info.skus], ['Changeovers included', info.changeovers],
     ['CIPs included', info.cips], ['Observers', info.observers],
+    ['Operators observed', (info.operatorNames || []).join(', ')],
+    ['Observed time (hours)', { v: obs.minutes / 60, s: S.dec2 }, obs.source === 'manual' ? 'set manually' : 'from the logged touches, per day'],
+    ['Finished', info.finishedAt ? new Date(info.finishedAt) : 'in progress'],
     [],
     [{ v: 'Reference frame', s: S.bold }],
     ['Operators on the line per shift', Number(info.operators) || 0],
@@ -68,10 +73,11 @@ export function workbookSheets(run, lists) {
     ['Break / non-available time per operator (hours)', Number(info.breakHours) || 0],
     ['Shifts covered by this map', Number(info.shifts) || 1],
     ['Available activity per operator (hours)', { v: available, s: S.calc }],
+    ['Capacity based on', info.capacityMode === 'observed' ? 'observed time' : 'full shift(s), as in the template'],
     [{ v: 'REFERENCE CAPACITY (operator-hours)', s: S.bold }, { v: capacity, s: S.calc }],
   ];
 
-  const a = analyse(run.touches, info, lists);
+  const a = analyse(run.touches, info, lists, { capacity });
   const h = a.headline;
   const head = ['Touches', 'Minutes', 'Op-hours', '% of minutes'].map(x => ({ v: x, s: S.header }));
   const blockRows = (title, label, blk, nameOf = i => i.key, note = '') => [
@@ -144,13 +150,12 @@ export function buildBackup(run, lists, now = new Date()) {
 
 const str = v => (typeof v === 'string' ? v.slice(0, 2000) : '');
 const num = v => (typeof v === 'number' && isFinite(v) ? v : null);
-const CODES = new Set(CATEGORIES.map(c => c.code));
 
 /** Keep only known fields with sane types: used for backups and for touches arriving by sync. */
 export function cleanTouch(t) {
   return {
     id: String(t.id).slice(0, 80), zone: str(t.zone), who: str(t.who), planned: ['Planned', 'Unplanned'].includes(t.planned) ? t.planned : '',
-    category: CODES.has(t.category) ? t.category : '', type: str(t.type), touchType: ['Physical', 'Information'].includes(t.touchType) ? t.touchType : '',
+    category: /^[PU]\d{1,2}$/.test(t.category || '') ? t.category : '', type: str(t.type), touchType: ['Physical', 'Information'].includes(t.touchType) ? t.touchType : '',
     count: num(t.count) ?? 1, countMode: t.countMode === 'one' ? 'one' : 'all', perOccMin: num(t.perOccMin), durManual: !!t.durManual,
     timedSec: num(t.timedSec), start: str(t.start) || null, end: str(t.end) || null, description: str(t.description),
     route: str(t.route) || 'To be decided', observer: str(t.observer), createdAt: str(t.createdAt) || null,
@@ -163,6 +168,7 @@ export function cleanInfo(info) {
   for (const [k, v] of Object.entries(info || {})) {
     if (typeof v === 'string') out[k] = v.slice(0, 500);
     else if (typeof v === 'number' && isFinite(v)) out[k] = v;
+    else if (Array.isArray(v)) out[k] = v.filter(x => typeof x === 'string').map(x => x.slice(0, 80)).slice(0, 60);
   }
   return out;
 }
@@ -197,5 +203,5 @@ export function runCells(run) {
   const i = run.info || {};
   return [run.name, i.line || '', i.plant || '', i.from || '', i.to || '', i.skus || '', i.changeovers || '', i.cips || '',
     i.observers || '', Number(i.operators) || 0, Number(i.shiftHours) || 0, Number(i.breakHours) || 0, Number(i.shifts) || 1,
-    referenceCapacity(i).capacity];
+    runCapacity(run)];
 }

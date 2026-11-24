@@ -1,7 +1,8 @@
 // Team sync: one shared log across phones and tablets, kept in the team's Google Sheet.
 // Every change is queued on the device first, so logging never waits for the network;
 // a sync sends the queue and brings back what the other devices changed since last time.
-import { DEFAULT_INFO } from './framework.js';
+import { DEFAULT_INFO, applyFramework } from './framework.js';
+import { applyColors } from './colors.js';
 import { state, save, hooks, markEverything, pendingCount, ensureRun } from './store.js';
 import { syncCells, runCells, cleanTouch, cleanInfo } from './export.js';
 
@@ -17,7 +18,7 @@ export function validSyncUrl(url) {
 const newer = (a, b) => String(a || '') > String(b || '');
 const listeners = new Set();
 export const onSync = (fn) => listeners.add(fn);
-const emit = (changed) => listeners.forEach(fn => { try { fn(changed); } catch { /* a view failing must not stop sync */ } });
+const emit = (changed) => [...listeners].forEach(fn => { try { fn(changed); } catch { /* a view failing must not stop sync */ } });
 
 let inflight = null;
 let again = false;
@@ -88,13 +89,31 @@ function buildBody() {
     sentR[id] = run.updatedAt;
   }
   const tombstones = [...s.tombstones];
-  return { body: { app: 'touchmap', v: 1, key: s.key || undefined, since: s.since || 0, runs, touches, tombstones }, sentT, sentR, tombstones };
+  const settings = s.dirtySetup && state.setupUpdatedAt
+    ? { updatedAt: state.setupUpdatedAt, data: { framework: state.framework, lists: state.lists, colors: state.colors, diagram: state.diagram, annotations: state.annotations, chartKinds: state.chartKinds } } : undefined;
+  return { body: { app: 'touchmap', v: 2, key: s.key || undefined, since: s.since || 0, runs, touches, tombstones, settings }, sentT, sentR, tombstones, sentSetupAt: settings?.updatedAt };
 }
 
 /** Apply what the server sent back. Returns true if anything on this device changed. */
 export function applyRemote(data, { firstSync = false } = {}) {
   let changed = false;
   const s = state.sync;
+  if (data.settings?.updatedAt && newer(data.settings.updatedAt, state.setupUpdatedAt)) {
+    const d = data.settings.data || {};
+    if (d.framework === null || Array.isArray(d.framework?.categories)) state.framework = d.framework ?? null;
+    if (d.lists && Array.isArray(d.lists.zones) && Array.isArray(d.lists.people)) {
+      state.lists = { zones: d.lists.zones.filter(x => typeof x === 'string').slice(0, 200), people: d.lists.people.filter(x => typeof x === 'string').slice(0, 200) };
+    }
+    if ('colors' in d) state.colors = d.colors && typeof d.colors === 'object' ? d.colors : null;
+    if ('diagram' in d) state.diagram = d.diagram && Array.isArray(d.diagram.shapes) ? d.diagram : null;
+    if ('annotations' in d) state.annotations = d.annotations && typeof d.annotations === 'object' ? d.annotations : {};
+    if ('chartKinds' in d) state.chartKinds = d.chartKinds && typeof d.chartKinds === 'object' ? d.chartKinds : {};
+    state.setupUpdatedAt = data.settings.updatedAt;
+    s.dirtySetup = false;
+    applyFramework(state.framework);
+    applyColors(state.colors);
+    changed = true;
+  }
   const serverRunIds = new Set((data.runs || []).map(r => r.id));
 
   for (const r of data.runs || []) {
@@ -170,7 +189,7 @@ export function syncNow() {
   busy = true;
   emit(false);
   inflight = (async () => {
-    const { body, sentT, sentR, tombstones } = buildBody();
+    const { body, sentT, sentR, tombstones, sentSetupAt } = buildBody();
     const firstSync = !s.since;
     let res;
     try {
@@ -193,6 +212,9 @@ export function syncNow() {
     }
     for (const [id, at] of Object.entries(sentR)) if (!state.runs[id] || state.runs[id].updatedAt === at) delete s.dirtyRuns[id];
     s.tombstones = s.tombstones.filter(t => !tombstones.includes(t));
+    s.serverV = Number(data.v) || 1;
+    // An old script ignores Setup; keep it queued until the script is updated.
+    if (sentSetupAt && s.serverV >= 2 && state.setupUpdatedAt === sentSetupAt) s.dirtySetup = false;
 
     const changed = applyRemote(data, { firstSync });
     s.since = Number(data.rev) || s.since;

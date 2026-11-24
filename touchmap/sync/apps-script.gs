@@ -7,11 +7,12 @@
  *   3. Deploy → New deployment → Select type: Web app.
  *        Execute as: Me        Who has access: Anyone
  *      Deploy, allow the permissions, and copy the Web app URL (it ends in /exec).
- *   4. In Touch Map: Run → Team sync → paste the URL → Connect.
+ *   4. In Touch Map: Setup (gear icon) → Team sync → paste the URL → Connect.
  *      Then "Share join link" to connect every other phone and tablet.
  *
- * The sheet fills three tabs: Touches (a live Observation Log), Runs, and Deleted.
- * Do not edit those three tabs by hand: build pivots and charts on other tabs instead.
+ * The sheet fills four tabs: Touches (a live Observation Log), Runs, Deleted and Settings
+ * (the team's touch framework and lists from Setup). Do not edit those tabs by hand:
+ * build pivots and charts on other tabs instead.
  * Anyone with the Web app URL can read and add touches, so share it only with the team.
  * For an extra lock, set TEAM_KEY below and type the same key on each device.
  *
@@ -27,9 +28,11 @@ var RUN_COLS = ['Run', 'Line', 'Plant', 'Window from', 'Window to', 'Formats / S
 var META_COLS = ['ID', 'Rev', 'Data'];
 var DEL_COLS = ['Kind', 'ID', 'Run ID', 'Deleted at', 'Rev'];
 var DATE_COLS = { 'Start timestamp': true, 'End timestamp': true };
+var SETTINGS_COLS = ['Key', 'Updated', 'Rev', 'Data'];
+var CHUNK = 40000;   // a cell holds 50,000 characters; long setups span rows
 
 function doGet() {
-  return json_({ ok: true, app: 'touchmap-sync', v: 1 });
+  return json_({ ok: true, app: 'touchmap-sync', v: 2 });
 }
 
 function doPost(e) {
@@ -56,7 +59,8 @@ function sync_(ss, body, now) {
   var runs = table_(ss, 'Runs', RUN_COLS.concat(META_COLS), 'item');
   var touches = table_(ss, 'Touches', TOUCH_COLS.concat(META_COLS), 'item');
   var dead = table_(ss, 'Deleted', DEL_COLS, 'dead');
-  var maxRev = Math.max(runs.maxRev, touches.maxRev, dead.maxRev);
+  var settings = settings_(ss);
+  var maxRev = Math.max(runs.maxRev, touches.maxRev, dead.maxRev, settings.rev);
   var rev = Math.max(now, maxRev + 1);
   var reject = {};
 
@@ -97,6 +101,19 @@ function sync_(ss, body, now) {
     map.items[data.id] = { data: data, rev: rev, row: row.concat([data.id, rev, JSON.stringify(data)]) };
     map.changed = true;
   }
+  // Setup (touch framework and lists): one shared record, newest wins.
+  var settingsRejected = false;
+  if (body.settings && body.settings.updatedAt) {
+    if (!settings.updatedAt || newer_(body.settings.updatedAt, settings.updatedAt)) {
+      settings.updatedAt = body.settings.updatedAt;
+      settings.data = JSON.stringify(body.settings.data || {});
+      settings.rev = rev;
+      settings.changed = true;
+    } else if (newer_(settings.updatedAt, body.settings.updatedAt)) {
+      settingsRejected = true;
+    }
+  }
+
   (body.runs || []).forEach(function (r) { upsert(runs, r, RUN_COLS); });
   (body.touches || []).forEach(function (t) { upsert(touches, t, TOUCH_COLS); });
 
@@ -117,10 +134,14 @@ function sync_(ss, body, now) {
     return ka.localeCompare(kb);
   });
   write_(dead);
+  writeSettings_(settings);
 
   var since = Number(body.since) || 0;
-  var changedAny = runs.changed || touches.changed || dead.changed;
-  var out = { ok: true, rev: changedAny ? rev : maxRev, runs: [], touches: [], tombstones: [] };
+  var changedAny = runs.changed || touches.changed || dead.changed || settings.changed;
+  var out = { ok: true, v: 2, rev: changedAny ? rev : maxRev, runs: [], touches: [], tombstones: [] };
+  if (settings.updatedAt && (settings.rev > since || settingsRejected)) {
+    try { out.settings = { updatedAt: settings.updatedAt, data: JSON.parse(settings.data) }; } catch (err) { /* unreadable: skip */ }
+  }
   Object.keys(runs.items).forEach(function (id) { var it = runs.items[id]; if (it.rev > since || reject[id]) out.runs.push(it.data); });
   Object.keys(touches.items).forEach(function (id) { var it = touches.items[id]; if (it.rev > since || reject[id]) out.touches.push(it.data); });
   Object.keys(dead.items).forEach(function (id) {
@@ -157,6 +178,35 @@ function table_(ss, name, head, kind) {
     t.items[id] = { data: data, rev: rev, row: row };
   }
   return t;
+}
+
+function settings_(ss) {
+  var sheet = ss.getSheetByName('Settings') || ss.insertSheet('Settings');
+  var values = sheet.getDataRange().getValues();
+  var out = { sheet: sheet, updatedAt: '', data: '', rev: 0, changed: false };
+  var parts = [];
+  for (var r = 1; r < values.length; r++) {
+    var key = String(values[r][0] || '');
+    if (key.indexOf('setup') !== 0) continue;
+    out.updatedAt = String(values[r][1] || '');
+    out.rev = Math.max(out.rev, Number(values[r][2]) || 0);
+    parts.push({ i: Number(key.split(':')[1]) || 0, d: String(values[r][3] || '') });
+  }
+  parts.sort(function (a, b) { return a.i - b.i; });
+  out.data = parts.map(function (p) { return p.d; }).join('');
+  return out;
+}
+
+function writeSettings_(st) {
+  if (!st.changed) return;
+  var rows = [SETTINGS_COLS];
+  for (var i = 0, n = 0; i < Math.max(1, st.data.length); i += CHUNK, n++) {
+    rows.push(['setup:' + n, st.updatedAt, st.rev, st.data.slice(i, i + CHUNK)]);
+  }
+  st.sheet.clearContents();
+  st.sheet.getRange(1, 1, rows.length, SETTINGS_COLS.length).setValues(rows);
+  st.sheet.getRange(1, 1, 1, SETTINGS_COLS.length).setFontWeight('bold');
+  st.sheet.setFrozenRows(1);
 }
 
 function write_(t, sortFn) {

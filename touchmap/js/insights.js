@@ -3,9 +3,13 @@
 // other choices stay visible (the selected one is highlighted instead).
 import { CAT_BY_CODE, CATEGORIES, NOTES, READING_COMPARISON } from './framework.js';
 import { analyse, NOT_SET } from './analysis.js';
-import { fmtMin, totalMinutes, referenceCapacity } from './model.js';
+import { fmtMin, totalMinutes, runCapacity, observedMinutes } from './model.js';
 import { state, activeRun, runsList } from './store.js';
-import { h, clear, icon, fmt } from './ui.js';
+import { h, clear, icon, fmt, infoNote, openModal, closeModal, fmtDuration } from './ui.js';
+import { hbars, columns, catColumns, pareto as paretoChart, donut as donutChart, lines as linesChart, table as itemsTable, kindSwitch } from './charts.js';
+import { annotationLayer } from './annotate.js';
+import { zoneColour } from './colors.js';
+import { markSetup } from './store.js';
 
 const SVGNS = 'http://www.w3.org/2000/svg';
 const COLOUR = {
@@ -21,13 +25,14 @@ const LEVER = {
 };
 
 /* ---------- filters ---------- */
-const F = { scope: '', day: '', observer: '', planned: '', category: '', zone: '', touchType: '', who: '', type: '', hour: '' };
+const F = { runs: [], run: '', day: '', observer: '', planned: '', category: '', zone: '', touchType: '', who: '', type: '', hour: '' };
 const UI = { catOrder: 'pareto', typeSort: 'minutes', typeAll: false, filtersOpen: false };
 let rootEl = null;
 
 const hourOf = (t) => { const iso = t.start || t.createdAt; return iso ? String(new Date(iso).getHours()).padStart(2, '0') : ''; };
 const typeKey = (t) => (t.category && t.type ? `${t.category}\u0000${t.type}` : '');
 const DIMS = {
+  run: { label: 'Run', get: t => t._run, name: v => state.runs[v]?.name || 'Run' },
   day: { label: 'Day', get: t => fmt.dayKey(t.start || t.createdAt), name: v => fmt.day(v + 'T12:00:00') },
   observer: { label: 'Observer', get: t => t.observer },
   planned: { label: 'Planned / Unplanned', get: t => t.planned },
@@ -42,15 +47,87 @@ const DIM_KEYS = Object.keys(DIMS);
 const activeDims = () => DIM_KEYS.filter(d => F[d]);
 
 function scope() {
-  let runs;
-  if (F.scope === 'all') runs = runsList().filter(r => !r.localOnly || r.id === state.activeRunId);
-  else runs = [state.runs[F.scope] || activeRun()];
-  if (F.scope && F.scope !== 'all' && !state.runs[F.scope]) F.scope = '';
-  const touches = runs.flatMap(r => r.touches);
-  const capacity = runs.reduce((s, r) => s + referenceCapacity(r.info).capacity, 0);
-  const label = F.scope === 'all' ? `All runs (${runs.length})` : runs[0].name;
+  F.runs = F.runs.filter(id => state.runs[id]);
+  const runs = F.runs.length ? F.runs.map(id => state.runs[id]) : [activeRun()];
+  if (F.run && !runs.some(r => r.id === F.run)) F.run = '';
+  const touches = runs.flatMap(r => r.touches.map(t => ({ ...t, _run: r.id })));
+  const capacity = runs.filter(r => !F.run || r.id === F.run).reduce((s, r) => s + runCapacity(r), 0);
+  const label = runs.length === 1 ? runs[0].name : `${runs.length} runs`;
   return { runs, touches, capacity, label };
 }
+
+/** Open Analysis on these runs (one, several, or all), with other filters cleared. */
+export function analyseRuns(ids) {
+  F.runs = [...new Set(ids)].filter(id => state.runs[id]);
+  for (const d of DIM_KEYS) F[d] = '';
+  if (location.hash.startsWith('#analysis')) rerender(); else location.hash = '#analysis';
+}
+
+function runPicker() {
+  const chosen = new Set(F.runs.length ? F.runs : [state.activeRunId]);
+  const list = runsList().slice().reverse();
+  const box = h('div', { class: 'confirm run-picker' });
+  const paint = () => clear(box,
+    h('div', { class: 'wiz-top' }, h('h2', {}, icon('history'), ' Which runs?'),
+      h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Close', onclick: () => closeModal() }, icon('close'))),
+    h('div', { class: 'row-gap' },
+      h('button', { type: 'button', class: 'btn ghost small', onclick: () => { chosen.clear(); chosen.add(state.activeRunId); paint(); } }, icon('timer'), 'This run'),
+      h('button', { type: 'button', class: 'btn ghost small', onclick: () => { chosen.clear(); list.filter(r => !r.localOnly).forEach(r => chosen.add(r.id)); paint(); } }, icon('layers'), 'All runs')),
+    h('ul', { class: 'pick-list' }, list.map(r => {
+      const cb = h('input', { type: 'checkbox', checked: chosen.has(r.id), id: 'pk-' + r.id });
+      cb.addEventListener('change', () => { if (cb.checked) chosen.add(r.id); else chosen.delete(r.id); });
+      const days = [...new Set(r.touches.map(t => fmt.dayKey(t.start || t.createdAt)).filter(Boolean))].sort();
+      return h('li', {}, h('label', { for: 'pk-' + r.id }, cb,
+        h('span', { class: 'pk-name', text: r.name }),
+        h('span', { class: 'muted small' }, icon('calendar'), days.length ? fmt.day(days[0] + 'T12:00:00') + (days.length > 1 ? ` +${days.length - 1}` : '') : '–', '  ', icon('hand'), String(r.touches.length))));
+    })),
+    h('div', { class: 'row-end' },
+      h('button', { type: 'button', class: 'btn primary', onclick: () => { closeModal(); analyseRuns(chosen.size ? [...chosen] : [state.activeRunId]); } }, icon('check'), 'Show')));
+  paint();
+  openModal(box, { label: 'Which runs?' });
+}
+
+/** One row per run when several are in view: how they compare. */
+function runsCompared(sc) {
+  const rows = sc.runs.map(r => {
+    let planned = 0, unplanned = 0, touches = 0;
+    for (const t of filtered(sc.touches.filter(x => x._run === r.id), ['run'])) {
+      const m = totalMinutes(t);
+      if (t.planned === 'Planned') planned += m; else if (t.planned === 'Unplanned') unplanned += m;
+      touches += Number(t.count) || 0;
+    }
+    const cap = runCapacity(r);
+    const days = [...new Set(r.touches.map(t => fmt.dayKey(t.start || t.createdAt)).filter(Boolean))].sort();
+    return { r, planned, unplanned, total: planned + unplanned, touches, cap, cov: cap ? (planned + unplanned) / 60 / cap : null, days, obs: observedMinutes(r).minutes };
+  });
+  rows.sort((a, b) => String(a.days[0] || a.r.createdAt).localeCompare(String(b.days[0] || b.r.createdAt)));
+  const max = Math.max(...rows.map(x => x.total), 0) || 1;
+  const ctx = ctxFor('run');
+  return chartCard('runs', 'Runs compared', 'history', {
+    kinds: ['bars', 'columns', 'line', 'table'], def: 'bars',
+    note: 'One entry per run, oldest first, with the other filters applied. Tap a run to look at it alone.',
+    before: (kind) => (kind === 'table' ? null : legendRow()),
+    render: (kind) => {
+      if (kind === 'columns') return columns(rows.map(x => ({ key: x.r.id, label: x.r.name, short: x.r.name, rest: [`Coverage ${fmt.pct(x.cov)}`, `${fmt.int(x.touches)} touches`],
+        segs: [{ value: x.planned, colour: COLOUR.Planned, label: 'Planned' }, { value: x.unplanned, colour: COLOUR.Unplanned, label: 'Unplanned' }] })), ctx, { xRotate: rows.length > 5 });
+      if (kind === 'line') return linesChart(rows.map(x => ({ key: x.r.id, label: x.r.name, short: x.days[0] ? fmt.day(x.days[0] + 'T12:00:00') : x.r.name })), [
+        { label: 'Planned', colour: COLOUR.Planned, values: rows.map(x => x.planned) },
+        { label: 'Unplanned', colour: COLOUR.Unplanned, values: rows.map(x => x.unplanned) }], ctx);
+      if (kind === 'table') return itemsTable(rows.map(x => ({ key: x.r.id, label: x.r.name, value: x.total, touches: x.touches })), { label: 'Run' });
+      return h('div', { class: 'cmp' }, rows.map(x => {
+      const el = h('div', { class: 'cmp-row' + selState('run', x.r.id) },
+        h('div', { class: 'cmp-name' }, h('strong', { text: x.r.name }),
+          h('span', { class: 'muted small' }, icon('calendar'), x.days.length ? fmt.day(x.days[0] + 'T12:00:00') : '–', ' ', icon('clock'), fmtDuration(x.obs))),
+        h('div', { class: 'cmp-bar' },
+          h('span', { style: { width: `${(x.planned / max) * 100}%`, background: COLOUR.Planned } }),
+          h('span', { style: { width: `${(x.unplanned / max) * 100}%`, background: COLOUR.Unplanned } })),
+        h('div', { class: 'cmp-val' }, h('strong', { text: `${fmtMin(x.total)} min` }), h('span', { class: 'muted small', text: `${fmt.pct(x.cov)} cov · ${fmt.int(x.touches)} t` })));
+      return interactive(el, { lead: `${fmtMin(x.total)} min`, rest: [x.r.name, `Planned ${fmtMin(x.planned)} · Unplanned ${fmtMin(x.unplanned)}`, `Coverage ${fmt.pct(x.cov)}`], onPick: () => toggle({ run: x.r.id }) });
+      }));
+    },
+  });
+}
+const legendRow = () => legend([{ label: 'Planned', colour: COLOUR.Planned }, { label: 'Unplanned', colour: COLOUR.Unplanned }]);
 
 function filtered(touches, except = []) {
   const skip = new Set(except);
@@ -120,106 +197,19 @@ function legend(items, { dim } = {}) {
   }));
 }
 
-/** Donut for an at-a-glance share (≤ 6 parts). The legend and labels carry the numbers. */
-function donut({ parts, dim, centre, caption, ariaLabel }) {
-  const total = parts.reduce((s, p) => s + p.value, 0);
-  const S = 220, cx = 110, cy = 110, R = 104, r = 66;
-  const el = svg('svg', { viewBox: `0 0 ${S} ${S}`, class: 'donut', role: 'group', 'aria-label': ariaLabel });
-  const pt = (rad, deg) => { const a = (deg - 90) * Math.PI / 180; return [cx + rad * Math.cos(a), cy + rad * Math.sin(a)]; };
-  const arc = (a0, a1) => {
-    const large = a1 - a0 > 180 ? 1 : 0;
-    const [x0, y0] = pt(R, a0), [x1, y1] = pt(R, a1), [x2, y2] = pt(r, a1), [x3, y3] = pt(r, a0);
-    return `M${x0} ${y0}A${R} ${R} 0 ${large} 1 ${x1} ${y1}L${x2} ${y2}A${r} ${r} 0 ${large} 0 ${x3} ${y3}Z`;
-  };
-  let a = 0;
-  for (const p of parts.filter(p => p.value > 0)) {
-    const share = total ? p.value / total : 0;
-    const a1 = a + share * 360;
-    const d = share > 0.9999 ? `${arc(0, 180)}${arc(180, 359.999)}` : arc(a, a1);
-    const g = svg('g', { class: 'arc' + (dim && p.key ? selState(dim, p.key) : '') });
-    g.append(svg('path', { d, fill: p.colour }));
-    if (share >= 0.08 && p.inside !== false) {
-      const [tx, ty] = pt((R + r) / 2, a + share * 180);
-      const t = svg('text', { x: tx, y: ty, class: 'arc-label', 'text-anchor': 'middle', 'dominant-baseline': 'central' });
-      t.textContent = p.inside ?? fmt.pct(share);
-      g.append(t);
-    }
-    interactive(g, {
-      lead: `${fmtMin(p.value)} min · ${fmt.pct(share)}`, rest: [p.label, ...(p.rest || [])],
-      label: `${p.label}: ${fmtMin(p.value)} minutes, ${fmt.pct(share)}`,
-      onPick: dim && p.key ? () => toggle({ [dim]: p.key }) : null,
-    });
-    el.append(g);
-    a = a1;
-  }
-  if (!total) el.append(svg('circle', { cx, cy, r: (R + r) / 2, fill: 'none', stroke: 'var(--track)', 'stroke-width': R - r }));
-  const c1 = svg('text', { x: cx, y: cy - 6, class: 'donut-centre', 'text-anchor': 'middle' }); c1.textContent = centre;
-  const c2 = svg('text', { x: cx, y: cy + 20, class: 'donut-caption', 'text-anchor': 'middle' }); c2.textContent = caption;
-  el.append(c1, c2);
-  return el;
-}
-
 function splitParts(blk, order) {
   const items = blk.items.filter(i => i.minutes > 0);
   return [...order.filter(k => items.some(i => i.key === k)).map(k => items.find(i => i.key === k)), ...items.filter(i => !order.includes(i.key))]
     .map(i => ({ key: i.key === NOT_SET ? '' : i.key, label: i.key === NOT_SET ? 'Not set' : i.key, value: i.minutes, colour: COLOUR[i.key] || COLOUR.none, rest: [`${fmt.int(i.touches)} touches · ${fmt.dec(i.opHours, 1)} op-hours`] }));
 }
 
-function donutCard(title, note, d, items, dim) {
-  return h('section', { class: 'card donut-card' },
-    h('h2', { class: 'card-h', text: title }),
-    h('div', { class: 'donut-wrap' }, d),
-    legend(items.map(i => ({ key: i.key, label: `${i.label} · ${fmtMin(i.value)} min`, colour: i.colour })), { dim }),
-    note ? h('p', { class: 'card-note', text: note }) : null);
-}
-
-function barList(items, { label, colour = () => COLOUR.single, dim, keyOf = i => i.key, highlight = () => false }) {
-  const max = Math.max(...items.map(i => i.minutes), 0);
-  return h('div', { class: 'bars' }, items.map(i => {
-    const w = max ? i.minutes / max : 0;
-    const key = keyOf(i);
-    const row = h('div', { class: 'bar-row' + (highlight(i) ? ' hi' : '') + (dim && key ? selState(dim, key) : '') },
-      h('div', { class: 'bar-label' }, label(i, true)),
-      h('div', { class: 'bar-track' },
-        h('div', { class: 'bar', style: { width: `max(${i.minutes > 0 ? '3px' : '0px'}, calc((100% - 112px) * ${w.toFixed(4)}))`, background: colour(i) } }),
-        h('span', { class: 'bar-val' }, h('strong', { text: fmtMin(i.minutes) }), ' min', h('span', { class: 'bar-pct', text: ` · ${fmt.pct(i.pct)}` }))));
-    return interactive(row, {
-      lead: `${fmtMin(i.minutes)} min`, label: `${label(i)}: ${fmtMin(i.minutes)} minutes`,
-      rest: [label(i), `${fmt.int(i.touches)} touches · ${fmt.dec(i.opHours, 2)} op-hours`, `${fmt.pct(i.pct, 1)} of minutes${i.cum != null ? ` · cumulative ${fmt.pct(i.cum)}` : ''}`],
-      onPick: dim && key && key !== NOT_SET ? () => toggle({ [dim]: key }) : null,
-    });
-  }));
-}
-
-function table(label, blk, nameOf = i => i.key, { cum = false } = {}) {
-  const head = [label, 'Touches', 'Minutes', 'Op-hours', '% of minutes', ...(cum ? ['Cumulative'] : [])];
-  return h('details', { class: 'tbl-wrap' },
-    h('summary', { text: 'Table' }),
-    h('div', { class: 'tbl-scroll' },
-      h('table', { class: 'tbl' },
-        h('thead', {}, h('tr', {}, head.map((x, i) => h('th', { scope: 'col', class: i ? 'num' : '', text: x })))),
-        h('tbody', {}, blk.items.map(i => h('tr', {},
-          h('th', { scope: 'row', text: nameOf(i) }),
-          h('td', { class: 'num', text: fmt.int(i.touches) }),
-          h('td', { class: 'num', text: fmt.dec(i.minutes, 2) }),
-          h('td', { class: 'num', text: fmt.dec(i.opHours, 2) }),
-          h('td', { class: 'num', text: fmt.pct(i.pct, 1) }),
-          cum ? h('td', { class: 'num', text: fmt.pct(i.cum, 1) }) : null))),
-        h('tfoot', {}, h('tr', {},
-          h('th', { scope: 'row', text: 'Total' }),
-          h('td', { class: 'num', text: fmt.int(blk.total.touches) }),
-          h('td', { class: 'num', text: fmt.dec(blk.total.minutes, 2) }),
-          h('td', { class: 'num', text: fmt.dec(blk.total.opHours, 2) }),
-          h('td', { class: 'num', text: blk.total.minutes ? '100%' : '–' }),
-          cum ? h('td') : null)))));
-}
-
+const CARD_ICON = { 'Which lever applies': 'layers', 'When in the shift': 'clock', 'By category': 'tag', 'By zone / equipment': 'pin', 'By person observed': 'users', 'Where × why: zone by category': 'grid', 'Types of touch': 'hand', 'Runs compared': 'history' };
 function card(title, note, ...body) {
-  return h('section', { class: 'card' }, h('h2', { class: 'card-h', text: title }), body, note ? h('p', { class: 'card-note', text: note }) : null);
+  return h('section', { class: 'card' }, h('h2', { class: 'card-h' }, CARD_ICON[title] ? icon(CARD_ICON[title]) : null, title), body, note ? infoNote(note) : null);
 }
 
-function tile(label, value, sub) {
-  return h('div', { class: 'tile' }, h('div', { class: 'tile-label', text: label }), h('div', { class: 'tile-val', text: value }), sub ? h('div', { class: 'tile-sub', text: sub }) : null);
+function tile(label, value, sub, ico) {
+  return h('div', { class: 'tile' }, h('div', { class: 'tile-label' }, ico ? icon(ico) : null, label), h('div', { class: 'tile-val', text: value }), sub ? h('div', { class: 'tile-sub', text: sub }) : null);
 }
 
 function segBar(parts, { total, ariaLabel }) {
@@ -257,6 +247,95 @@ const catLabel = (i, rich) => {
 };
 const catColour = (i) => (CAT_BY_CODE[i.key] ? (CAT_BY_CODE[i.key].planned ? COLOUR.Planned : COLOUR.Unplanned) : COLOUR.none);
 
+
+/* ---------- chart cards: switchable type, notes on top ---------- */
+const ctxFor = (dim) => ({
+  sel: (key) => (dim && key ? selState(dim, key) : ''),
+  pick: dim ? (key) => toggle({ [dim]: key }) : null,
+  tip: (el, lead, rest = [], onPick = null, label = null) => interactive(el, { lead, rest, onPick, label }),
+});
+function chartKind(id, kinds, def) {
+  const k = state.chartKinds?.[id];
+  return kinds.includes(k) ? k : def;
+}
+function setKind(id, k) {
+  state.chartKinds = { ...(state.chartKinds || {}), [id]: k };
+  markSetup(); rerender();
+}
+/** A card whose chart type can be switched and which can carry notes. */
+function chartCard(id, title, ico, o) {
+  const kinds = o.kinds || [];
+  const kind = kinds.length ? chartKind(id, kinds, o.def || kinds[0]) : null;
+  const body = h('div', { class: 'chart-body' }, o.render(kind));
+  const cardEl = h('section', { class: 'card chart-card', 'data-chart': id });
+  const ann = annotationLayer(cardEl, body, id);
+  const before = o.before ? o.before(kind) : null;
+  const after = o.after ? o.after(kind) : null;
+  // native append() neither flattens lists nor skips empty slots: build the list here
+  cardEl.append(...[
+    h('div', { class: 'chart-head' },
+      h('h2', { class: 'card-h' }, icon(ico), title),
+      h('div', { class: 'chart-tools' }, kinds.length > 1 ? kindSwitch(kinds, kind, k => setKind(id, k)) : null, ann.button)),
+    before ? h('div', { class: 'chart-before' }, before) : null,
+    body,
+    after ? h('div', { class: 'chart-after' }, after) : null,
+    o.note ? infoNote(o.note) : null,
+  ].filter(Boolean));
+  return cardEl;
+}
+/** One renderer per kind for a list of items. */
+function itemsChart(kind, items, dim, opts = {}) {
+  const ctx = ctxFor(dim);
+  if (!items.length || !items.some(i => i.value > 0)) return h('p', { class: 'empty', text: 'Nothing logged here yet.' });
+  if (kind === 'donut') return donutChart(items, ctx, opts.donut || {});
+  if (kind === 'columns') return catColumns(items, ctx);
+  if (kind === 'pareto') return paretoChart(items, ctx);
+  if (kind === 'table') return itemsTable(items, { label: opts.label || 'Item', cum: opts.cum });
+  return hbars(items, ctx, { highlight: opts.highlight || (() => false) });
+}
+const toItems = (list, { label = i => i.key, short, rich, colour = () => COLOUR.single } = {}) => list.map(i => ({
+  key: i.key === NOT_SET ? '' : i.key, label: i.key === NOT_SET ? 'Not set' : label(i), short: short ? short(i) : undefined, rich: rich ? rich(i) : undefined,
+  value: i.minutes, touches: i.touches, pct: i.pct, colour: colour(i),
+  rest: [`${fmt.int(i.touches)} touches · ${fmt.dec(i.opHours, 2)} op-hours`, i.cum != null ? `cumulative ${fmt.pct(i.cum)}` : null].filter(Boolean),
+}));
+
+/* ---------- when in the shift ---------- */
+function shiftCard(touches) {
+  const buckets = new Map();
+  for (const t of touches) {
+    const hr = hourOf(t);
+    if (!hr) continue;
+    const b = buckets.get(hr) || { Planned: 0, Unplanned: 0, none: 0, touches: 0 };
+    const m = totalMinutes(t);
+    if (t.planned === 'Planned' || t.planned === 'Unplanned') b[t.planned] += m; else b.none += m;
+    b.touches += Number(t.count) || 0;
+    buckets.set(hr, b);
+  }
+  const keys = [...buckets.keys()].map(Number);
+  const hours = [];
+  if (keys.length) for (let x = Math.min(...keys); x <= Math.max(...keys); x++) hours.push(String(x).padStart(2, '0'));
+  const rows = hours.map(k => ({ k, ...(buckets.get(k) || { Planned: 0, Unplanned: 0, none: 0, touches: 0 }) }));
+  const totalAll = rows.reduce((s2, r) => s2 + r.Planned + r.Unplanned + r.none, 0);
+  return chartCard('shift', 'When in the shift', 'clock', {
+    kinds: ['columns', 'combo', 'line', 'table'], def: 'columns',
+    note: 'Mapped minutes by the hour each touch started. “Columns + line” adds the running share of the shift’s minutes on its own % scale. Tap an hour to filter.',
+    before: (kind) => (kind === 'table' ? null : legendRow()),
+    render: (kind) => {
+      if (!rows.length) return h('p', { class: 'empty', text: 'No timed touches yet.' });
+      const ctx = ctxFor('hour');
+      const cols = rows.map(r => ({ key: r.k, label: `${r.k}:00–${r.k}:59`, short: r.k, rest: [`${fmt.int(r.touches)} touches`],
+        segs: [{ value: r.Planned, colour: COLOUR.Planned, label: 'Planned' }, { value: r.Unplanned, colour: COLOUR.Unplanned, label: 'Unplanned' }, { value: r.none, colour: COLOUR.none, label: 'Not set' }] }));
+      if (kind === 'line') return linesChart(rows.map(r => ({ key: r.k, label: `${r.k}:00`, short: r.k })), [
+        { label: 'Planned', colour: COLOUR.Planned, values: rows.map(r => r.Planned) },
+        { label: 'Unplanned', colour: COLOUR.Unplanned, values: rows.map(r => r.Unplanned) }], ctx);
+      if (kind === 'table') return itemsTable(rows.map(r => ({ key: r.k, label: `${r.k}:00–${r.k}:59`, value: r.Planned + r.Unplanned + r.none, touches: r.touches })), { label: 'Hour' });
+      let run = 0;
+      const cum = rows.map(r => { run += r.Planned + r.Unplanned + r.none; return totalAll ? run / totalAll : 0; });
+      return columns(cols, ctx, kind === 'combo' ? { line: { values: cum, label: 'Share of the shift so far' } } : {});
+    },
+  });
+}
+
 /* ---------- the four levers ---------- */
 function leverMatrix(touches) {
   const cell = {};
@@ -290,52 +369,7 @@ function leverMatrix(touches) {
         });
       }),
     ]));
-  return card('Which lever applies', 'Planned touches are attacked by design and automation, unplanned by reliability; Physical touches by automation, Information touches by digitalisation. Tap a quadrant to filter.', grid);
-}
-
-/* ---------- when in the shift ---------- */
-function timeline(touches) {
-  const buckets = new Map();
-  for (const t of touches) {
-    const hr = hourOf(t);
-    if (!hr) continue;
-    const b = buckets.get(hr) || { Planned: 0, Unplanned: 0, none: 0, touches: 0 };
-    const m = totalMinutes(t);
-    if (t.planned === 'Planned' || t.planned === 'Unplanned') b[t.planned] += m; else b.none += m;
-    b.touches += Number(t.count) || 0;
-    buckets.set(hr, b);
-  }
-  if (!buckets.size) return card('When in the shift', null, h('p', { class: 'empty', text: 'No timed touches yet.' }));
-  const keys = [...buckets.keys()].map(Number);
-  const lo = Math.min(...keys), hi = Math.max(...keys);
-  const hours = [];
-  for (let x = lo; x <= hi; x++) hours.push(String(x).padStart(2, '0'));
-  const totals = hours.map(k => { const b = buckets.get(k); return b ? b.Planned + b.Unplanned + b.none : 0; });
-  const max = Math.max(...totals, 0);
-  const niceMax = max <= 0 ? 1 : (() => { const p = 10 ** Math.floor(Math.log10(max)); return Math.ceil(max / p) * p; })();
-  const peak = totals.indexOf(max);
-  const cols = hours.map((k, idx) => {
-    const b = buckets.get(k) || { Planned: 0, Unplanned: 0, none: 0, touches: 0 };
-    const tot = totals[idx];
-    const seg = (v, colour) => (v > 0 ? h('div', { class: 'tl-seg', style: { height: `${(v / niceMax) * 100}%`, background: colour } }) : null);
-    const col = h('div', { class: 'tl-col' + selState('hour', k) },
-      h('div', { class: 'tl-stack' },
-        idx === peak && tot > 0 ? h('span', { class: 'tl-val', style: { bottom: `calc(${(tot / niceMax) * 100}% + 4px)` }, text: fmtMin(tot) }) : null,
-        seg(b.Planned, COLOUR.Planned), seg(b.Unplanned, COLOUR.Unplanned), seg(b.none, COLOUR.none)),
-      h('span', { class: 'tl-x', text: k }));
-    return interactive(col, {
-      lead: `${fmtMin(tot)} min`, rest: [`${k}:00–${k}:59`, `Planned ${fmtMin(b.Planned)} · Unplanned ${fmtMin(b.Unplanned)}`, `${fmt.int(b.touches)} touches`],
-      label: `${k}:00: ${fmtMin(tot)} minutes`, onPick: tot > 0 ? () => toggle({ hour: k }) : null,
-    });
-  });
-  const ticks = [niceMax, niceMax / 2, 0];
-  return card('When in the shift', 'Mapped minutes by the hour each touch started, stacked by planned and unplanned. Tap an hour to filter.',
-    legend([{ key: 'Planned', label: 'Planned', colour: COLOUR.Planned }, { key: 'Unplanned', label: 'Unplanned', colour: COLOUR.Unplanned }]),
-    h('div', { class: 'tl' },
-      h('div', { class: 'tl-y' }, ticks.map(t => h('span', { text: fmtMin(t) }))),
-      h('div', { class: 'tl-plot' },
-        h('div', { class: 'tl-grid' }, ticks.map(() => h('span'))),
-        h('div', { class: 'tl-cols' }, cols))));
+  return chartCard('lever', 'Which lever applies', 'layers', { note: 'Planned touches are attacked by design and automation, unplanned by reliability; Physical touches by automation, Information touches by digitalisation. Tap a quadrant to filter.', render: () => grid });
 }
 
 /* ---------- where × why ---------- */
@@ -371,9 +405,9 @@ function heatmap(touches) {
         });
       }),
     ]));
-  return card('Where × why: zone by category', 'Darker = more minutes; the biggest cells carry their number. Tap a cell to filter by both.',
+  return chartCard('heatmap', 'Where × why: zone by category', 'grid', { note: 'Darker = more minutes; the biggest cells carry their number. Tap a cell to filter by both.', render: () => h('div', {},
     h('div', { class: 'hm-scroll' }, grid),
-    h('div', { class: 'ramp-legend' }, h('span', { text: 'Fewer minutes' }), h('span', { class: 'ramp-bar' }), h('span', { text: 'More' })));
+    h('div', { class: 'ramp-legend' }, h('span', { text: 'Fewer minutes' }), h('span', { class: 'ramp-bar' }), h('span', { text: 'More' }))) });
 }
 
 /* ---------- types of touch, sortable ---------- */
@@ -395,7 +429,15 @@ function typesTable(touches) {
   const maxMin = Math.max(...rows.map(r => r.minutes), 0);
   const th = (key, text) => h('th', { scope: 'col', class: 'num', 'aria-sort': UI.typeSort === key ? 'descending' : 'none' },
     h('button', { type: 'button', class: 'sort' + (UI.typeSort === key ? ' on' : ''), onclick: () => { UI.typeSort = key; rerender(); } }, text, UI.typeSort === key ? ' ↓' : ''));
-  return card('Types of touch', 'Sort by total minutes for the biggest prizes, by touches for the most frequent (automation candidates), or by minutes per touch for the longest single jobs. Tap a row to filter.',
+  const typeItems = [...rows].sort((a, b) => b.minutes - a.minutes).slice(0, 15).map(r => {
+    const c = CAT_BY_CODE[r.code];
+    return { key: r.key, label: `${r.code} · ${r.type}`, short: r.code, rich: h('span', { class: 'bl' }, h('span', { class: 'code ' + (c?.planned ? 'code-p' : 'code-u'), text: r.code }), h('span', { text: r.type })),
+      value: r.minutes, touches: r.touches, pct: r.pct, colour: c?.planned ? COLOUR.Planned : COLOUR.Unplanned, rest: [`${fmt.int(r.touches)} touches · ${fmt.dec(r.avg, 2)} min each`] };
+  });
+  return chartCard('types', 'Types of touch', 'hand', {
+    kinds: ['table', 'bars', 'pareto'], def: 'table',
+    note: 'Sort the table by total minutes for the biggest prizes, by touches for the most frequent (automation candidates), or by minutes per touch for the longest single jobs. Bars and Pareto show the top 15. Tap one to filter.',
+    render: (kind) => (kind !== 'table' ? itemsChart(kind, typeItems, 'type') : h('div', {},
     rows.length ? h('div', { class: 'tbl-scroll' },
       h('table', { class: 'tbl types-tbl' },
         h('thead', {}, h('tr', {}, h('th', { scope: 'col', text: 'Type of touch' }), th('touches', 'Touches'), th('avg', 'Min / touch'), th('minutes', 'Total min'), h('th', { scope: 'col', class: 'num', text: '%' }))),
@@ -409,7 +451,8 @@ function typesTable(touches) {
             h('td', { class: 'num', text: fmt.pct(r.pct, 1) }));
           return interactive(tr, { lead: `${fmtMin(r.minutes)} min`, rest: [`${r.code} · ${r.type}`, `${fmt.int(r.touches)} touches · ${fmt.dec(r.avg, 2)} min each`], onPick: () => toggle({ type: r.key }) });
         })))) : h('p', { class: 'empty', text: 'No categorised touches yet.' }),
-    rows.length > 12 ? h('button', { type: 'button', class: 'link-btn', onclick: () => { UI.typeAll = !UI.typeAll; rerender(); } }, UI.typeAll ? 'Show the top 12' : `Show all ${rows.length}`) : null);
+    rows.length > 12 ? h('button', { type: 'button', class: 'link-btn', onclick: () => { UI.typeAll = !UI.typeAll; rerender(); } }, UI.typeAll ? 'Show the top 12' : `Show all ${rows.length}`) : null)),
+  });
 }
 
 /* ---------- filter bar ---------- */
@@ -422,21 +465,19 @@ function filterBar(sc) {
     s.addEventListener('change', () => { F[dim] = s.value; rerender(); });
     return h('label', { class: 'filter' }, h('span', { text: DIMS[dim]?.label || 'Run' }), s);
   };
-  const runOpts = [['all', 'All runs'], ...runsList().filter(r => r.id !== state.activeRunId).map(r => [r.id, r.name])];
-  const runSel = h('select', { 'aria-label': 'Run', class: F.scope ? 'on' : '' },
-    h('option', { value: '', text: `This run · ${activeRun().name}` }),
-    runOpts.map(([v, t]) => h('option', { value: v, selected: F.scope === v, text: t })));
-  runSel.addEventListener('change', () => { F.scope = runSel.value; rerender(); });
+  const multi = F.runs.length > 1 || (F.runs.length === 1 && F.runs[0] !== state.activeRunId);
+  const runBtn = h('button', { type: 'button', class: 'run-btn' + (multi ? ' on' : ''), onclick: runPicker },
+    icon('history'), h('span', { text: sc.runs.length > 1 ? `${sc.runs.length} runs` : sc.runs[0].name }), icon('chevron'));
 
   const cats = values('category').sort((a, b) => CATEGORIES.findIndex(c => c.code === a) - CATEGORIES.findIndex(c => c.code === b));
   const show = (dim, list) => (list.length > 1 || F[dim]);
-  const chips = ['type', 'hour'].filter(d => F[d]).map(d => h('button', { type: 'button', class: 'chip small on', onclick: () => { F[d] = ''; rerender(); } }, `${DIMS[d].label}: ${DIMS[d].name(F[d])}`, ' ✕'));
+  const chips = ['run', 'type', 'hour'].filter(d => F[d]).map(d => h('button', { type: 'button', class: 'chip small on', onclick: () => { F[d] = ''; rerender(); } }, `${DIMS[d].label}: ${DIMS[d].name(F[d])}`, ' ✕'));
   const any = activeDims().length;
   const wide = window.matchMedia('(min-width: 760px)').matches;
   const box = h('details', { class: 'an-filters', open: wide || UI.filtersOpen || false },
     h('summary', { class: 'btn ghost small' }, icon('list'), any ? `Filters · ${any} on` : 'Filters'),
     h('div', { class: 'an-filter-row' },
-      h('label', { class: 'filter' }, h('span', { text: 'Run' }), runSel),
+      h('label', { class: 'filter' }, h('span', { text: 'Runs' }), runBtn),
       show('day', values('day')) ? select('day', values('day').map(v => [v, DIMS.day.name(v)]), 'All days') : null,
       show('observer', values('observer')) ? select('observer', values('observer').map(v => [v, v]), 'All observers') : null,
       select('planned', ['Planned', 'Unplanned'].map(v => [v, v]), 'Planned + unplanned'),
@@ -476,15 +517,15 @@ export function renderInsights(root) {
 
   const head = h('div', { class: 'view-head' },
     h('div', {},
-      h('h1', { class: 'view-title', text: 'Analysis' }),
-      h('p', { class: 'view-sub', text: `${sc.label}${filterNote ? ` · filtered: ${filterNote}` : ' · updates itself as the log fills'}` })),
+      h('h1', { class: 'view-title' }, icon('chart', 'title-ico'), 'Analysis'),
+      h('p', { class: 'view-sub', text: `${sc.label}${filterNote ? ` · filtered: ${filterNote}` : ''}` })),
     h('button', { type: 'button', class: 'btn ' + (presenting ? 'primary' : 'ghost'), onclick: () => setPresent(!presenting) }, icon(presenting ? 'close' : 'chart'), presenting ? 'Exit presentation' : 'Present'));
 
   if (!sc.touches.length) {
     clear(root, h('section', { class: 'insights' }, head,
       h('div', { class: 'empty-state' }, icon('chart', 'big'),
-        h('p', { text: 'The analysis fills itself as you log touches. Want to see it working first? Load the demo run from the Run tab.' }),
-        h('a', { class: 'btn ghost', href: '#run' }, icon('run'), 'Open Run'))));
+        h('p', { text: 'The analysis fills itself as you log touches. Want to see it working first? Load the demo run from Setup → This device.' }),
+        h('a', { class: 'btn ghost', href: '#setup' }, icon('gear'), 'Open Setup'))));
     return;
   }
   if (!all.length) {
@@ -547,48 +588,64 @@ export function renderInsights(root) {
           segBar(coverParts, { total: Math.max(hd.capacity, hd.opHours), ariaLabel: `Planned ${fmt.dec(hd.plannedHours)} h, unplanned ${fmt.dec(hd.unplannedHours)} h, of ${fmt.dec(hd.capacity)} h reference capacity` }),
           h('div', { class: 'axis-ends' }, h('span', { text: '0' }), h('span', { text: `${fmt.dec(hd.capacity)} op-hours reference capacity` })),
           legend(coverParts.map(p => ({ label: `${p.label} · ${fmt.dec(p.value)} h`, colour: p.colour, track: p.track }))),
-          over ? h('p', { class: 'warn-line' }, icon('warn'), 'Mapped hours exceed the reference capacity. Check the Run tab: operators, shift length and shifts covered.') : null)),
+          over ? h('p', { class: 'warn-line' }, icon('warn'), 'Mapped hours exceed the reference capacity. Check the run’s reference frame in Runs: operators, shift length and shifts covered.') : null)),
       h('div', { class: 'tiles' },
-        tile('Touches logged', fmt.int(hd.touchesLogged), `${a.rows} rows`),
-        tile('Mapped minutes', fmt.int(hd.minutes)),
-        tile('Mapped op-hours', fmt.dec(hd.opHours)),
-        tile('Reference capacity', fmt.dec(hd.capacity), 'operator-hours'),
-        tile('Unexplained gap', fmt.dec(hd.gap), 'operator-hours')),
-      presenting ? null : h('p', { class: 'card-note', text: READING_COMPARISON })),
+        tile('Touches', fmt.int(hd.touchesLogged), `${a.rows} rows`, 'hand'),
+        tile('Mapped minutes', fmt.int(hd.minutes), null, 'timer'),
+        tile('Mapped op-hours', fmt.dec(hd.opHours), null, 'users'),
+        tile('Reference', fmt.dec(hd.capacity), 'operator-hours', 'target'),
+        tile('Gap', fmt.dec(hd.gap), 'operator-hours', 'gauge')),
+      presenting ? null : infoNote(READING_COMPARISON, 'Reading the gap')),
+
+    sc.runs.length > 1 ? runsCompared(sc) : null,
 
     h('div', { class: 'grid-3' },
-      donutCard('Planned vs unplanned', NOTES.planned,
-        donut({ parts: pParts, dim: 'planned', centre: fmt.pct(plannedShare), caption: 'planned', ariaLabel: 'Share of minutes, planned vs unplanned' }), pParts, 'planned'),
-      donutCard('Physical vs information', 'Physical → automation; Information → digitalisation.',
-        donut({ parts: ttParts, dim: 'touchType', centre: fmt.pct(physShare), caption: 'physical', ariaLabel: 'Share of minutes by touch type' }), ttParts, 'touchType'),
-      donutCard('Where the minutes go', 'The five biggest categories; the rest folded into Other.',
-        donut({ parts: catParts, dim: 'category', centre: fmt.int(catTotal), caption: 'minutes', ariaLabel: 'Share of minutes by category' }), catParts, 'category')),
+      chartCard('planned', 'Planned vs unplanned', 'layers', {
+        kinds: ['donut', 'bars', 'columns', 'table'], def: 'donut', note: NOTES.planned,
+        render: (kind) => itemsChart(kind, toItems(pBlk.items.filter(i => i.minutes > 0), { colour: i => COLOUR[i.key] || COLOUR.none }), 'planned',
+          { label: 'Split', donut: { centre: fmt.pct(plannedShare), caption: 'planned', ariaLabel: 'Share of minutes, planned vs unplanned' } }),
+      }),
+      chartCard('touchType', 'Physical vs information', 'hand', {
+        kinds: ['donut', 'bars', 'columns', 'table'], def: 'donut', note: 'Physical → automation; Information → digitalisation.',
+        render: (kind) => itemsChart(kind, toItems(ttBlk.items.filter(i => i.minutes > 0), { colour: i => COLOUR[i.key] || COLOUR.none }), 'touchType',
+          { label: 'Touch type', donut: { centre: fmt.pct(physShare), caption: 'physical', ariaLabel: 'Share of minutes by touch type' } }),
+      }),
+      chartCard('share', 'Where the minutes go', 'trend', {
+        kinds: ['donut', 'pareto', 'bars', 'columns', 'table'], def: 'donut', note: 'By category. The donut shows the five biggest and folds the rest into Other; Pareto adds the running share with an 80% mark.',
+        render: (kind) => itemsChart(kind, toItems(catA.catPareto, { label: i => CAT_BY_CODE[i.key]?.name || i.key, short: i => i.key, rich: i => catLabel(i, true), colour: catColour }), 'category',
+          { label: 'Category', cum: true, donut: { centre: fmt.int(catTotal), caption: 'minutes', ariaLabel: 'Share of minutes by category', maxParts: 6 } }),
+      })),
 
     h('div', { class: 'grid-2' },
       leverMatrix(filtered(sc.touches, ['planned', 'touchType'])),
-      timeline(filtered(sc.touches, ['hour']))),
+      shiftCard(filtered(sc.touches, ['hour']))),
 
-    card('By category', null,
-      h('div', { class: 'card-tools' },
-        legend([{ label: 'Planned (P)', colour: COLOUR.Planned }, { label: 'Unplanned (U)', colour: COLOUR.Unplanned }]),
-        h('div', { class: 'seg small', role: 'group', 'aria-label': 'Order' },
-          [['pareto', 'Pareto'], ['framework', 'P1 → U7']].map(([k, t]) => h('button', {
-            type: 'button', class: 'seg-btn' + (UI.catOrder === k ? ' on' : ''), 'aria-pressed': String(UI.catOrder === k),
-            onclick: () => { UI.catOrder = k; rerender(); },
-          }, t)))),
-      catA.top3.length ? h('p', { class: 'callout' },
-        h('strong', { text: `Top ${catA.top3.length} = ${fmt.pct(catA.top3Share)} of mapped minutes. ` }),
-        catA.top3.map(i => CAT_BY_CODE[i.key]?.name).filter(Boolean).join(' · '),
-        h('span', { class: 'muted', text: '. ' + NOTES.category })) : null,
-      barList(catItems, { label: catLabel, colour: catColour, dim: 'category', highlight: i => UI.catOrder === 'pareto' && top3Codes.has(i.key) }),
-      table('Category', { items: catItems, total: catA.byCategory.total }, i => catLabel(i), { cum: UI.catOrder === 'pareto' })),
+    chartCard('category', 'By category', 'tag', {
+      kinds: ['bars', 'pareto', 'columns', 'donut', 'table'], def: 'bars', note: NOTES.category,
+      before: (kind) => [
+        h('div', { class: 'card-tools' },
+          legend([{ label: 'Planned (P)', colour: COLOUR.Planned }, { label: 'Unplanned (U)', colour: COLOUR.Unplanned }]),
+          kind === 'bars' || kind === 'columns' || kind === 'table' ? h('div', { class: 'seg small', role: 'group', 'aria-label': 'Order' },
+            [['pareto', 'Biggest first'], ['framework', 'P1 → U7']].map(([k, t]) => h('button', {
+              type: 'button', class: 'seg-btn' + (UI.catOrder === k ? ' on' : ''), 'aria-pressed': String(UI.catOrder === k),
+              onclick: () => { UI.catOrder = k; rerender(); },
+            }, t))) : null),
+        catA.top3.length ? h('p', { class: 'callout' },
+          h('strong', { text: `Top ${catA.top3.length} = ${fmt.pct(catA.top3Share)} of mapped minutes. ` }),
+          catA.top3.map(i => CAT_BY_CODE[i.key]?.name).filter(Boolean).join(' · ')) : null],
+      render: (kind) => itemsChart(kind, toItems(catItems, { label: i => CAT_BY_CODE[i.key]?.name || 'Not categorised', short: i => i.key, rich: i => catLabel(i, true), colour: catColour }), 'category',
+        { label: 'Category', cum: UI.catOrder === 'pareto', highlight: i => UI.catOrder === 'pareto' && top3Codes.has(i.key) }),
+    }),
 
     h('div', { class: 'grid-2' },
-      card('By zone / equipment', NOTES.zone,
-        zoneItems.length ? barList(zoneItems, { label: i => i.key, dim: 'zone' }) : h('p', { class: 'empty', text: 'No zones yet.' }),
-        table('Zone / equipment', zoneA.byZone)),
-      people.length ? card('By person observed', 'Optional field: only rows where the person was recorded.',
-        barList(people, { label: i => i.key, dim: 'who' }), table('Person', { items: people, total: whoA.byPerson.total })) : null),
+      chartCard('zone', 'By zone / equipment', 'pin', {
+        kinds: ['bars', 'columns', 'pareto', 'donut', 'table'], def: 'bars', note: NOTES.zone,
+        render: (kind) => itemsChart(kind, toItems(zoneItems, { colour: i => zoneColour(i.key) || COLOUR.single }), 'zone', { label: 'Zone / equipment' }),
+      }),
+      people.length ? chartCard('person', 'By person observed', 'users', {
+        kinds: ['bars', 'columns', 'donut', 'table'], def: 'bars', note: 'Optional field: only rows where the person was recorded.',
+        render: (kind) => itemsChart(kind, toItems(people), 'who', { label: 'Person' }),
+      }) : null),
 
     heatmap(filtered(sc.touches, ['zone', 'category'])),
     typesTable(filtered(sc.touches, ['type'])),

@@ -1,4 +1,4 @@
-// The Team sync card on the Run tab, the status pill in the app bar, and the join-link flow.
+// The Team sync card in Setup, the status pill in the app bar, and the join-link flow.
 import { state } from './store.js';
 import { status, connect, disconnect, syncNow, joinLink, validSyncUrl, onSync } from './sync.js';
 import { h, clear, icon, toast, openModal, closeModal, fmt } from './ui.js';
@@ -36,8 +36,8 @@ function shortUrl(u) {
   return m ? `script.google.com/…/${m[1]}…${m[2]}/exec` : u;
 }
 
-export function syncCard() {
-  const card = h('section', { class: 'card sync-card', id: 'team-sync' });
+export function syncCard({ bare = false } = {}) {
+  const card = h('section', { class: (bare ? '' : 'card ') + 'sync-card', id: 'team-sync' });
 
   function paint() {
     const st = status();
@@ -54,7 +54,7 @@ export function syncCard() {
         paint();
       });
       clear(card,
-        h('div', { class: 'sync-head' }, h('h2', { class: 'card-h', text: 'Team sync' }), h('span', { class: 'pill off', text: 'Off' })),
+        h('div', { class: 'sync-head' }, bare ? null : h('h2', { class: 'card-h', text: 'Team sync' }), h('span', { class: 'pill off' }, icon('cloudOff'), 'Off')),
         h('p', {}, 'Share one live log across every phone and tablet. Touches go to a Google Sheet your team owns, and the sheet itself becomes a live Observation Log. Logging still works offline: changes wait on the device and go up when the signal is back.'),
         h('details', { class: 'steps' },
           h('summary', { text: 'Set it up once for the team (about 5 minutes, easiest on a computer)' }),
@@ -74,7 +74,7 @@ export function syncCard() {
       return;
     }
     clear(card,
-      h('div', { class: 'sync-head' }, h('h2', { class: 'card-h', text: 'Team sync' }), h('span', { class: 'pill ' + st.kind, text: st.label })),
+      h('div', { class: 'sync-head' }, bare ? null : h('h2', { class: 'card-h', text: 'Team sync' }), h('span', { class: 'pill ' + st.kind }, icon(st.kind === 'ok' ? 'cloudCheck' : st.kind === 'offline' ? 'cloudOff' : 'cloud'), st.label)),
       h('p', { class: 'muted' }, `Connected to ${shortUrl(s.url)}. Last synced ${fmt.ago(s.lastOk)}. New touches from other devices arrive within about 30 seconds while the app is open.`),
       st.kind === 'error' ? h('p', { class: 'warn-line' }, icon('warn'), st.error) : null,
       h('div', { class: 'row-gap' },
@@ -97,14 +97,15 @@ export function paintSyncPill() {
   el.hidden = st.kind === 'off';
   el.className = 'sync-pill ' + st.kind;
   el.title = st.error || st.label;
-  clear(el, h('span', { class: 'sync-dot' }), h('span', { class: 'sync-label', text: st.label }));
+  const ico = { ok: 'cloudCheck', busy: 'cloud', pending: 'cloud', offline: 'cloudOff', error: 'warn' }[st.kind] || 'cloud';
+  clear(el, icon(ico), h('span', { class: 'sync-label', text: st.label }));
 }
 
 /** Opening a join link: confirm, then connect this device. */
 export async function handleJoin(params) {
   const url = params.get('join') || '';
   const key = params.get('key') || '';
-  history.replaceState(null, '', location.pathname + '#run');
+  history.replaceState(null, '', location.pathname + '#setup');
   if (!validSyncUrl(url)) { toast('That join link is not a Touch Map sync link.', { tone: 'bad' }); return; }
   if (state.sync.url === url) { toast('This device is already connected to that team log.'); return; }
   openModal(h('div', { class: 'confirm' },
