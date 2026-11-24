@@ -69,6 +69,7 @@ state.annotations ??= {};    // chart id → annotation shapes
 state.chartKinds ??= {};     // chart id → chosen chart type
 state.library ??= [];        // the team's saved diagram shapes (groups), shared through Setup sync
 state.profile ??= null;      // this device's user: { name, bu, plant, line, at } from onboarding
+state.logRunId ??= null;     // run shown in the Log: null = the one being logged into, 'all' = every run
 applyFramework(state.framework);
 applyColors(state.colors);
 

@@ -1,7 +1,8 @@
-// The observation log: every touch, newest first, tap to edit.
+// The observation log: every touch, newest first, tap to edit. It shows the run picked in Runs
+// (or here), the run being logged into by default, or every run's history at once.
 import { CAT_BY_CODE } from './framework.js';
-import { finalise, missingFields, ordered, totalMinutes, perOccurrence, fmtMin, FIELD_LABEL, blankTouch } from './model.js';
-import { state, save, activeRun, markTouch, removeTouch, restoreTouch, peopleFor } from './store.js';
+import { finalise, missingFields, ordered, totalMinutes, perOccurrence, fmtMin, FIELD_LABEL, blankTouch, sortKey } from './model.js';
+import { state, save, activeRun, runsList, markTouch, removeTouch, restoreTouch, peopleFor } from './store.js';
 import { registerEditor } from './stopwatch.js';
 import { touchForm } from './form.js';
 import { swipeable } from './swipe.js';
@@ -9,13 +10,34 @@ import { h, clear, icon, toast, openModal, closeModal, fmt } from './ui.js';
 
 const filters = { show: 'all', q: '' };
 
+/** Show this run in the Log ('all' for every run; null for the run being logged into). */
+export function showInLog(id) {
+  state.logRunId = id && id !== state.activeRunId ? id : null;
+  save();
+}
+const shownRun = () => (state.logRunId === 'all' ? null : state.runs[state.logRunId] || activeRun());
+
 export function renderLog(root, { onChange } = {}) {
-  const run = activeRun();
-  const all = ordered(run.touches);
-  const numberOf = new Map(all.map((t, i) => [t.id, i + 1]));
+  const active = activeRun();
+  const everyRun = state.logRunId === 'all';
+  const run = shownRun();
+  const runs = everyRun ? runsList() : [run];
+  // each touch with its run and its number in that run
+  const items = runs.flatMap(r => ordered(r.touches).map((t, i) => ({ t, r, num: i + 1 })))
+    .sort((a, b) => sortKey(a.t).localeCompare(sortKey(b.t)) || (a.t.createdAt || '').localeCompare(b.t.createdAt || ''));
+  const all = items.map(x => x.t);
   const needs = all.filter(t => t.incomplete).length;
   const totalMin = all.reduce((s, t) => s + totalMinutes(t), 0);
   const occ = all.reduce((s, t) => s + (Number(t.count) || 0), 0);
+  const rerender = () => renderLog(root, { onChange });
+
+  // which run: the one logged into, any earlier one, or all of them
+  const picker = h('select', { class: 'run-pick-sel', 'aria-label': 'Run shown in the log' },
+    runsList().slice().reverse().map(r => h('option', { value: r.id, selected: !everyRun && r.id === run.id,
+      text: `${r.name}${r.id === active.id ? ' · logging here' : ''} · ${r.touches.length} ${r.touches.length === 1 ? 'row' : 'rows'}` })),
+    runsList().length > 1 ? h('option', { value: 'all', selected: everyRun, text: `All runs · ${runsList().reduce((s, r) => s + r.touches.length, 0)} rows` }) : null);
+  picker.addEventListener('change', () => { showInLog(picker.value); rerender(); });
+  const elsewhere = everyRun || run.id !== active.id;
 
   const listEl = h('div', { class: 'entries' });
   const search = h('input', { type: 'search', class: 'search', placeholder: 'Search zone, type, description…', value: filters.q, 'aria-label': 'Search the log' });
@@ -27,10 +49,16 @@ export function renderLog(root, { onChange } = {}) {
   }, label);
 
   clear(root, h('section', { class: 'log' },
-    h('div', { class: 'view-head' },
+    h('div', { class: 'view-head log-head' },
       h('div', {},
         h('h1', { class: 'view-title', text: 'Observation log' }),
-        h('p', { class: 'view-sub', text: `${run.name} · ${all.length} rows · ${fmt.int(occ)} touches · ${fmtMin(totalMin)} min (${fmt.dec(totalMin / 60)} op-hours)` }))),
+        h('p', { class: 'view-sub', text: `${everyRun ? `All ${runs.length} runs` : run.name} · ${all.length} rows · ${fmt.int(occ)} touches · ${fmtMin(totalMin)} min (${fmt.dec(totalMin / 60)} op-hours)` })),
+      h('label', { class: 'run-pick' }, icon('history'), picker, icon('chevron', 'run-pick-chev'))),
+    elsewhere ? h('div', { class: 'log-note' }, icon('eye'),
+      h('span', {}, everyRun ? 'Showing every run’s touches, newest first. ' : `Showing ${run.name}. `, `New touches go to ${active.name}.`),
+      h('span', { class: 'log-note-acts' },
+        !everyRun ? h('button', { type: 'button', class: 'link-btn small', onclick: () => { state.activeRunId = run.id; showInLog(null); toast(`Now logging into “${run.name}”.`); onChange?.(); rerender(); } }, icon('timer'), 'Log into this run') : null,
+        h('button', { type: 'button', class: 'link-btn small', onclick: () => { showInLog(null); rerender(); } }, icon('back'), `Back to ${active.name}`))) : null,
     needs ? h('button', { type: 'button', class: 'banner warn', onclick: () => { filters.show = 'needs'; renderLog(root, { onChange }); } },
       icon('warn'), `${needs} ${needs === 1 ? 'touch needs' : 'touches need'} details. Categorise them while you still remember.`) : null,
     h('div', { class: 'filter-row' },
@@ -41,18 +69,18 @@ export function renderLog(root, { onChange } = {}) {
 
   function paintList() {
     const q = filters.q.trim().toLowerCase();
-    const rows = all.filter(t => {
+    const rows = items.filter(({ t, r }) => {
       if (filters.show === 'needs' && !t.incomplete) return false;
       if ((filters.show === 'Planned' || filters.show === 'Unplanned') && t.planned !== filters.show) return false;
       if (!q) return true;
-      const hay = [t.zone, t.who, t.type, t.description, t.touchType, t.category, CAT_BY_CODE[t.category]?.name, t.observer].join(' ').toLowerCase();
+      const hay = [t.zone, t.who, t.type, t.description, t.touchType, t.category, CAT_BY_CODE[t.category]?.name, t.observer, everyRun ? r.name : ''].join(' ').toLowerCase();
       return hay.includes(q);
     }).reverse();
 
     if (!all.length) {
       clear(listEl, h('div', { class: 'empty-state' },
         icon('hand', 'big'),
-        h('p', { text: 'No touches yet. Start the stopwatch on the Capture tab when a touch begins.' }),
+        h('p', { text: elsewhere ? `No touches in ${everyRun ? 'any run' : run.name} yet.` : 'No touches yet. Start the stopwatch on the Capture tab when a touch begins.' }),
         h('a', { class: 'btn primary', href: '#capture' }, icon('timer'), 'Go to Capture')));
       return;
     }
@@ -60,35 +88,35 @@ export function renderLog(root, { onChange } = {}) {
 
     let lastDay = null;
     const out = [];
-    for (const t of rows) {
-      const when = t.start || t.createdAt;
+    for (const it of rows) {
+      const when = it.t.start || it.t.createdAt;
       const day = fmt.dayKey(when);
       if (day !== lastDay) { out.push(h('div', { class: 'day-h', text: fmt.day(when) })); lastDay = day; }
-      out.push(entry(t, numberOf.get(t.id)));
+      out.push(entry(it));
     }
     clear(listEl, out);
   }
 
-  function entry(t, num) {
+  function entry({ t, r, num }) {
     const cat = CAT_BY_CODE[t.category];
     const per = perOccurrence(t);
     const total = totalMinutes(t);
     const refresh = () => { onChange?.(); renderLog(root, { onChange }); };
-    const row = h('button', { type: 'button', class: 'entry' + (t.incomplete ? ' incomplete' : ''), onclick: () => openEditor(t.id, refresh) },
+    const row = h('button', { type: 'button', class: 'entry' + (t.incomplete ? ' incomplete' : ''), onclick: () => openEditor(t.id, refresh, r) },
       h('span', { class: 'entry-num' }, h('strong', { text: `#${num}` }), h('span', { text: fmt.time(t.start || t.createdAt) })),
       h('span', { class: 'entry-main' },
         h('span', { class: 'entry-title' },
           cat ? h('span', { class: 'code ' + (cat.planned ? 'code-p' : 'code-u'), text: cat.code }) : h('span', { class: 'code code-x', text: '?' }),
           h('span', { text: t.type || 'Type of touch not set' })),
-        h('span', { class: 'entry-meta', text: [t.zone || 'No zone', t.who, t.touchType, t.observer ? `by ${t.observer}` : ''].filter(Boolean).join(' · ') }),
+        h('span', { class: 'entry-meta', text: [everyRun ? r.name : '', t.zone || 'No zone', t.who, t.touchType, t.observer ? `by ${t.observer}` : ''].filter(Boolean).join(' · ') }),
         t.description ? h('span', { class: 'entry-desc', text: t.description }) : null,
         t.incomplete ? h('span', { class: 'badge warn', text: 'Needs: ' + missingFields(t).map(m => FIELD_LABEL[m]).join(', ') }) : null),
       h('span', { class: 'entry-dur' },
         h('strong', { text: fmtMin(total) }), h('span', { text: ' min' }),
         h('small', { text: per == null ? `${t.count} counted` : `${t.count} × ${fmtMin(per)}` })));
     return swipeable(row, {
-      onLeft: () => deleteWithUndo(activeRun(), t.id, num, refresh),
-      onRight: () => openEditor(t.id, refresh),
+      onLeft: () => deleteWithUndo(r, t.id, num, refresh),
+      onRight: () => openEditor(t.id, refresh, r),
     });
   }
 
@@ -105,8 +133,7 @@ export function deleteWithUndo(run, id, num, onDone) {
 }
 
 /** Edit one logged touch in a dialog, with the same form as capture. */
-export function openEditor(id, onDone) {
-  const run = activeRun();
+export function openEditor(id, onDone, run = activeRun()) {
   const idx = run.touches.findIndex(t => t.id === id);
   if (idx < 0) return;
   const original = run.touches[idx];
@@ -141,7 +168,7 @@ export function openEditor(id, onDone) {
 
   openModal(h('div', { class: 'editor' },
     h('div', { class: 'editor-top' },
-      h('div', {}, h('h2', { text: `Edit touch #${num}` }), h('p', { class: 'muted', text: `${timing}${original.observer ? ` · observer ${original.observer}` : ''}` })),
+      h('div', {}, h('h2', { text: `Edit touch #${num}${run.id !== state.activeRunId ? ` · ${run.name}` : ''}` }), h('p', { class: 'muted', text: `${timing}${original.observer ? ` · observer ${original.observer}` : ''}` })),
       h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Close', onclick: () => closeModal() }, icon('close'))),
     form.el,
     h('div', { class: 'editor-actions' },

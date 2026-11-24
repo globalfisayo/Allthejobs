@@ -101,6 +101,11 @@ Admins see a shield next to the gear. It opens one page for the whole business u
    or tap it to open the editor. A short swipe springs back, and scrolling up and down
    works as normal. Touches saved with **Next touch** that still need answers are flagged
    *Needs details*.
+
+   **Which run it shows:** the run you're logging into by default. Select a run in **Runs**
+   (or tap its **Log** button) and the Log shows that run's history instead. The picker at
+   the top switches to any run, or to **All runs**. A note says where new touches go, with
+   *Log into this run* and *Back*. Edits and deletes apply to the run the touch belongs to.
 5. **Analysis** tab: everything on the template's Analysis sheet, interactive, for one
    run, several, or all. See [Analysis and presenting](#analysis-and-presenting).
 6. **Finish observation** (Runs → Observation time & finish): fixes the run and opens its

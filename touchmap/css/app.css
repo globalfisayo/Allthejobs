@@ -1291,3 +1291,16 @@ body.gated main { max-width: none; padding: 0; }
 }
 .btn.big { min-height: 54px; padding: 0 20px; font-size: 17px; border-radius: 14px; }
 .btn:disabled { opacity: .45; cursor: not-allowed; }
+
+/* ================= v6: the log follows the chosen run ================= */
+.log-head { align-items: flex-end; flex-wrap: wrap; }
+.run-pick { position: relative; display: inline-flex; align-items: center; gap: 8px; height: 44px; padding: 0 12px; border: 1.5px solid var(--line-2); border-radius: 12px; background: var(--surface); max-width: 100%; }
+.run-pick:focus-within { border-color: var(--ink); }
+.run-pick > .ico { color: var(--red); flex: none; }
+.run-pick-sel { appearance: none; -webkit-appearance: none; min-width: 0; max-width: 340px; height: 100%; padding: 0 22px 0 0; border: 0; background: transparent; font: inherit; font-size: 15px; font-weight: 700; color: var(--ink); text-overflow: ellipsis; cursor: pointer; outline: none; }
+.run-pick-chev { position: absolute; right: 10px; width: 17px; height: 17px; color: var(--ink-3); pointer-events: none; }
+.log-note { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 0 0 12px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); font-size: 14px; }
+.log-note > .ico { width: 18px; height: 18px; color: var(--ink-3); }
+.log-note > span:first-of-type { flex: 1 1 220px; }
+.log-note-acts { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+@media (max-width: 759px) { .run-pick { width: 100%; } .run-pick-sel { max-width: none; flex: 1; } }
