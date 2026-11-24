@@ -26,8 +26,12 @@ It works offline after the first visit, so patchy Wi-Fi on the line doesn't matt
   change.
 - **Tagging:** every run and touch is tagged with that plant and line, and with your name as
   the observer.
-- **Changing it later:** Setup → Your profile changes the plant, line or name, and signs
-  out.
+- **Changing it later:** the initials at the top right open your profile, Admin (for
+  admins) and **Log out**. Logging out starts the setup again at the next sign-in, with your
+  previous answers filled in. Logged touches stay. Setup → Your profile does the same.
+- **Business units:** Romania is live. Bulgaria, Hungary and Serbia show next, in colour.
+  *See all business units* lists the rest of the group, greyed out, until they go live. Edit
+  them in `js/org.js`.
 - **Changing a password:** run `node tools/hash-login.mjs <username> <password>` and put the
   new hash in `js/auth.js`. Only salted hashes are in the code, never the passwords.
 - **What the login does and doesn't do:** it keeps casual visitors out of the app. It is not
@@ -210,6 +214,19 @@ The Guide's line map is an editable drawing, so it can follow changes on the lin
 
 - **Shapes:** rectangles (with rounded corners), circles and ellipses, triangles, diamonds
   and hoppers.
+- **Room to draw:**
+  - The canvas uses the full width of the screen.
+  - The properties panel floats over it only while something is selected.
+  - The how-to sits behind the **?** in the corner.
+  - **Full screen** (the last toolbar button; Esc to leave) hides everything else.
+- **Tools:** hover a tool for its name; hover the ⓘ in that tip for what it does.
+- **Equipment numbers:** select a zone-linked shape and set its **Number**. A number that's
+  already used swaps places with it, and **Renumber all** closes the gaps. The Guide's black
+  badges show the numbers (switch the badges to *Touch types* or *This run*).
+- **Line drawings:** the picker next to the title has *Save as a new line* (for example
+  Ploiești K5) and *Start a blank line*.
+  - Saved drawings are shared with the team.
+  - The Guide opens the drawing for your own line, and its picker shows any other line.
 - **Groups:** select several shapes (drag a box round them), then **Group** (Ctrl/Cmd+G).
   They move, resize and link to a zone as one piece, such as a filler drawn from rings and
   pockets. **Ungroup** splits it again. Double-tap a group to edit its name.
@@ -219,7 +236,7 @@ The Guide's line map is an editable drawing, so it can follow changes on the lin
 - **Text:** a text tool, and text inside any shape (double-tap it).
 - **Lines and arrows:**
   - they **snap to the four dots on a shape and follow it** when it moves;
-  - straight or elbow;
+  - straight, elbow, rounded elbow or **curved** (the curved arrow tool, C);
   - bendable: drag the small square in the middle of a line to add a bend; drag a bend to
     move it;
   - solid, dashed, dotted or **conveyor** (a belt with flow chevrons);
@@ -238,6 +255,27 @@ The Guide's line map is an editable drawing, so it can follow changes on the lin
 - **Reset:** returns to the default K3 line. The default has the detail of the first Guide
   map: the filler's pockets, the blow moulder's cavities, preforms in the hopper, the
   packer's film, pallet layers and the conveyor's flow. Every machine is an editable group.
+
+**Editing touches from the Guide.** Tap a zone, then **Edit touches**:
+- add a touch type there;
+- move one to another zone;
+- reclassify it into another category, which can switch it between planned and unplanned
+  (its logged touches move with it);
+- take it off the zone;
+- hide or delete it.
+
+Every change except reclassifying has Undo, and all of them are shared with the team.
+
+**Icons.** Machines, people, planned/unplanned, categories and touch types have icons on
+Capture, the Log, Analysis and the Guide. They come from the free Lucide set (ISC licence).
+- **New categories:** get an icon suggested from their name, which you can change in Setup →
+  Touch types → Edit category.
+- **Zones:** tap a zone's icon in Setup → Zones to change it.
+
+**Capture shows where you are.** The question being answered is outlined in black with a red
+dot. Answered ones get a green tick. The ones still to come are greyed, though they still
+work if tapped. Once you pick an option, the others fade back. The Person observed choices
+use the run's operator names when they're set in Runs.
 
 The Guide always follows the touch types. Each type carries the zones where it happens
 (and whether it can happen on any machine), so a type added, renamed or hidden in Setup
@@ -284,7 +322,8 @@ marked. Each bar's details give its rank and the cumulative share. A table under
 the cumulative share row by row. There is no cumulative line on a second axis.
 
 **Notes on charts.** The ✎ on a chart adds text, arrows, lines, shapes, icons, and images
-you upload or paste, drawn over the chart. Notes are positioned relative to the chart, so
+you upload or paste, drawn over the chart. **Full screen** in the notes toolbar gives the
+chart the whole screen while you annotate. Notes are positioned relative to the chart, so
 they stay in place on a phone or a projector. They print with the page and are shared with
 the team.
 
@@ -358,6 +397,8 @@ node tests/mock-sync-server.mjs 8790  # local stand-in for the Apps Script; conn
 | `js/setup.js` | Setup: profile, touch framework editor, zones, people, sync, device |
 | `js/auth.js`, `tools/hash-login.mjs` | The shared logins (salted hashes) and the tool that makes a hash |
 | `js/org.js` | Business units → plants → lines; which plants are live |
+| `js/icons-lib.js`, `js/iconmap.js` | Curated Lucide icons (ISC), and which icon goes with each zone, person and category |
+| `js/usermenu.js` | The initials menu: profile, Admin, Log out |
 | `js/onboard.js` | Sign-in page and the step-by-step profile setup |
 | `js/admin.js`, `js/demo-org.js` | Admin: all plants with drill-down; demo data for plants not live yet |
 | `js/linemap.js`, `js/zonemap.js` | The Guide map card and zone popups; the default zone for each of the 74 types |

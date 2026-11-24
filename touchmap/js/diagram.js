@@ -1,9 +1,10 @@
 // The Guide diagram: the K3 line as editable shapes. Shapes linked to a zone open that zone's
 // touches in the Guide; conveyors and pipes are connectors attached to the machines.
-import { state, markSetup, profileName } from './store.js';
+import { state, save, markSetup, profileName } from './store.js';
+import { allPlants } from './org.js';
 import { FRAMEWORK } from './framework.js';
 import { createBoard } from './board.js';
-import { h, clear, icon, toast, confirmBox, deliverFile, stamp } from './ui.js';
+import { h, clear, icon, toast, confirmBox, deliverFile, stamp, slug, openModal, closeModal } from './ui.js';
 
 export const DIAGRAM_W = 1010, DIAGRAM_H = 610;
 
@@ -130,7 +131,9 @@ export function defaultDiagram() {
     ], { label: 1 }),
     { id: 'belt-label', type: 'text', zone: 'Conveyors', x: 852, y: 427, w: 110, h: 22, text: 'Conveyors', fill: 'none', stroke: INK, strokeWidth: 0, fontSize: 15, bold: true, textColor: INK, align: 'right' },
   ];
-  // the conveyor sits under the machines it runs through
+  // equipment numbers, in the order of the line (shown on the Guide's black badges)
+  const ORDER = ['z-store', 'z-preform', 'z-blow', 'z-label', 'z-fill', 'z-cap', 'z-mix', 'z-cip', 'z-coder', 'z-insp', 'belt-label', 'z-pack', 'z-pal', 'z-ctrl', 'z-other'];
+  ORDER.forEach((id, i) => { const sh = shapes.find(x => x.id === id); if (sh) sh.num = i + 1; });
   return { w: DIAGRAM_W, h: DIAGRAM_H, shapes };
 }
 
@@ -146,9 +149,70 @@ export function libraryItems() {
   return [...own, ...builtinLibrary()];
 }
 
-export const diagramDoc = () => (state.diagram && Array.isArray(state.diagram.shapes) ? state.diagram : defaultDiagram());
-export const isCustomDiagram = () => !!state.diagram;
+/* ---------- line drawings: the K3 default plus any line the team saves ---------- */
+export const K3_ID = 'k3';
+export const drawings = () => (state.lineDrawings || []).filter(d => d && d.id && Array.isArray(d.shapes));
+/** The drawing shown: the one picked on this device, else the one for my line, else K3. */
+export function currentDrawingId() {
+  const list = drawings();
+  if (state.drawingId === K3_ID) return K3_ID;
+  if (state.drawingId && list.some(d => d.id === state.drawingId)) return state.drawingId;
+  const p = state.profile;
+  const mine = p && list.find(d => d.plant === p.plant && d.line === p.line);
+  return mine ? mine.id : K3_ID;
+}
+export function drawingName(id = currentDrawingId()) {
+  return id === K3_ID ? 'K3' : drawings().find(d => d.id === id)?.name || 'Line';
+}
+export function diagramDoc() {
+  const id = currentDrawingId();
+  if (id !== K3_ID) { const d = drawings().find(x => x.id === id); return { w: d.w || DIAGRAM_W, h: d.h || DIAGRAM_H, shapes: d.shapes }; }
+  return state.diagram && Array.isArray(state.diagram.shapes) ? state.diagram : defaultDiagram();
+}
+export const isCustomDiagram = () => currentDrawingId() !== K3_ID || !!state.diagram;
 export const zonesOnDiagram = (doc = diagramDoc()) => [...new Set(doc.shapes.map(s => s.zone).filter(Boolean))];
+/** zone → equipment number on the current drawing */
+export function zoneNumbers(doc = diagramDoc()) {
+  const out = {};
+  for (const sh of doc.shapes) if (sh.zone && sh.num != null && out[sh.zone] == null) out[sh.zone] = sh.num;
+  return out;
+}
+/** Pick which drawing this device shows. */
+export function useDrawing(id) { state.drawingId = id; save(); }
+
+/** Options for a drawing picker: K3 and every saved line. */
+export function drawingOptions() {
+  return [{ id: K3_ID, name: 'K3 · Ploiești (default)' }, ...drawings().map(d => ({ id: d.id, name: d.name + (d.by ? ` · ${d.by}` : '') }))];
+}
+
+/** Ask for a name (and which plant and line it is), for a new line drawing. */
+function askLine({ title, okLabel, start = '' }) {
+  return new Promise((resolve) => {
+    let done = false;
+    const p = state.profile || {};
+    const name = h('input', { type: 'text', id: 'ld-name', value: start, placeholder: 'e.g. Ploiești K5', maxlength: '60', autocomplete: 'off' });
+    const plantSel = h('select', { id: 'ld-plant' }, allPlants().map(pl => h('option', { value: pl.id, selected: pl.id === (p.plant || 'PLO'), text: `${pl.name}${pl.live ? '' : ' (not live yet)'}` })));
+    const lineSel = h('select', { id: 'ld-line' });
+    const paintLines = () => {
+      const pl = allPlants().find(x => x.id === plantSel.value);
+      clear(lineSel, h('option', { value: '', text: 'Another line (not in the list)' }), (pl?.lines || []).map(l => h('option', { value: l.id, selected: l.id === p.line, text: `${l.name} · ${l.blurb}` })));
+    };
+    plantSel.addEventListener('change', paintLines); paintLines();
+    const finish = (v) => { done = true; closeModal(); resolve(v); };
+    const ok = () => { const n = name.value.trim(); if (!n) { toast('Give the line a name.', { tone: 'bad' }); return; } finish({ name: n, plant: plantSel.value, line: lineSel.value || null }); };
+    name.addEventListener('keydown', (e) => { if (e.key === 'Enter') ok(); });
+    openModal(h('div', { class: 'confirm editor-form' },
+      h('div', { class: 'wiz-top' }, h('h2', {}, icon('line'), ' ', title), h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Close', onclick: () => finish(null) }, icon('close'))),
+      h('label', { class: 'f', for: 'ld-name' }, h('span', { class: 'f-label', text: 'Name' }), name),
+      h('div', { class: 'f-grid' },
+        h('label', { class: 'f', for: 'ld-plant' }, h('span', { class: 'f-label', text: 'Plant' }), plantSel),
+        h('label', { class: 'f', for: 'ld-line' }, h('span', { class: 'f-label', text: 'Line' }), lineSel)),
+      h('p', { class: 'muted small', text: 'Saved drawings are shared with your team. Anyone on that line sees it in their Guide first.' }),
+      h('div', { class: 'row-end' }, h('button', { type: 'button', class: 'btn ghost', onclick: () => finish(null) }, 'Cancel'), h('button', { type: 'button', class: 'btn primary', onclick: ok }, icon('check'), okLabel))),
+    { label: title, onClose: () => { if (!done) resolve(null); } });
+    setTimeout(() => name.focus(), 50);
+  });
+}
 
 /* ---------- the editor page (#diagram) ---------- */
 let saveTimer = null;
@@ -157,27 +221,73 @@ export function renderDiagramEditor(root) {
   let pending = null;
   const status = h('span', { class: 'muted small de-status' });
   const markSaved = (txt) => { status.textContent = txt; };
-  const save = (doc) => {
+  const queueSave = (doc) => {
     markSaved('Saving…');
     pending = doc;
     clearTimeout(saveTimer);
     saveTimer = setTimeout(flush, 600);
   };
+  const drawingId = currentDrawingId();
   function flush() {
     if (!pending) return;
-    state.diagram = { w: pending.w, h: pending.h, shapes: pending.shapes };
+    if (drawingId === K3_ID) state.diagram = { w: pending.w, h: pending.h, shapes: pending.shapes };
+    else state.lineDrawings = drawings().map(d => (d.id === drawingId ? { ...d, w: pending.w, h: pending.h, shapes: pending.shapes, at: new Date().toISOString(), by: profileName() || d.by } : d));
     pending = null; markSetup(); markSaved('Saved');
   }
-  const exportPng = async () => {
-    const blob = await board.exportPng();
-    if (blob) deliverFile(blob, `k3-line-diagram-${stamp()}.png`, 'image/png');
-  };
-  const exportSvg = () => deliverFile(board.svgString().text, `k3-line-diagram-${stamp()}.svg`, 'image/svg+xml');
-  async function reset() {
-    const ok = await confirmBox({ title: 'Reset the diagram?', body: 'Your edits to the drawing are replaced by the default K3 line. Touch types and zones are not affected.', ok: 'Reset', danger: true });
+  const again = () => { clearTimeout(saveTimer); flush(); renderDiagramEditor(root); };
+  async function saveAsNew(blank) {
+    flush();
+    const p = state.profile || {};
+    const v = await askLine({ title: blank ? 'Start a new line drawing' : 'Save as a new line', okLabel: blank ? 'Start drawing' : 'Save line', start: blank ? '' : `${p.plantName || 'Ploiești'} ${p.lineCustom ? p.lineName : p.line || ''}`.trim() });
+    if (!v) { paintPicker(); return; }
+    const d = { id: 'ld' + Date.now().toString(36), ...v, w: DIAGRAM_W, h: DIAGRAM_H, shapes: blank ? [] : board.doc().shapes, by: profileName() || undefined, at: new Date().toISOString() };
+    state.lineDrawings = [...drawings(), d];
+    state.drawingId = d.id;
+    markSetup();
+    toast(blank ? `${d.name}: add machines from the Library, or draw them.` : `Saved as ${d.name}. It is shared with your team.`);
+    again();
+  }
+  async function renameIt() {
+    const d = drawings().find(x => x.id === drawingId); if (!d) return;
+    const v = await askLine({ title: 'Rename this line', okLabel: 'Save', start: d.name });
+    if (!v) return;
+    state.lineDrawings = drawings().map(x => (x.id === drawingId ? { ...x, ...v } : x));
+    markSetup(); again();
+  }
+  async function deleteIt() {
+    const d = drawings().find(x => x.id === drawingId); if (!d) return;
+    const ok = await confirmBox({ title: `Delete the ${d.name} drawing?`, body: 'It is removed for everyone on the team. Touches logged on that line are not affected.', ok: 'Delete drawing', danger: true });
     if (!ok) return;
     clearTimeout(saveTimer); pending = null;
-    state.diagram = null; markSetup();
+    state.lineDrawings = drawings().filter(x => x.id !== drawingId);
+    state.drawingId = K3_ID;
+    markSetup(); toast('Drawing deleted.'); renderDiagramEditor(root);
+  }
+  const picker = h('select', { class: 'run-pick-sel', 'aria-label': 'Line drawing' });
+  function paintPicker() {
+    clear(picker, drawingOptions().map(o => h('option', { value: o.id, selected: o.id === drawingId, text: o.name })),
+      h('option', { value: '__save', text: '＋ Save as a new line…' }),
+      h('option', { value: '__blank', text: '＋ Start a blank line…' }));
+  }
+  paintPicker();
+  picker.addEventListener('change', () => {
+    if (picker.value === '__save') return saveAsNew(false);
+    if (picker.value === '__blank') return saveAsNew(true);
+    clearTimeout(saveTimer); flush();
+    useDrawing(picker.value);
+    renderDiagramEditor(root);
+  });
+  const exportPng = async () => {
+    const blob = await board.exportPng();
+    if (blob) deliverFile(blob, `${slug(drawingName(drawingId))}-line-diagram-${stamp()}.png`, 'image/png');
+  };
+  const exportSvg = () => deliverFile(board.svgString().text, `${slug(drawingName(drawingId))}-line-diagram-${stamp()}.svg`, 'image/svg+xml');
+  async function reset() {
+    const k3 = drawingId === K3_ID;
+    const ok = await confirmBox({ title: k3 ? 'Reset the diagram?' : `Start ${drawingName(drawingId)} again from the K3 line?`, body: 'The drawing is replaced by the default K3 line. Touch types and zones are not affected.', ok: 'Reset', danger: true });
+    if (!ok) return;
+    clearTimeout(saveTimer); pending = null;
+    if (k3) { state.diagram = null; markSetup(); } else { pending = { w: DIAGRAM_W, h: DIAGRAM_H, shapes: defaultDiagram().shapes }; flush(); }
     board.setShapes(defaultDiagram().shapes); board.fit();
     toast('Diagram reset to the default.');
   }
@@ -187,6 +297,11 @@ export function renderDiagramEditor(root) {
     h('div', { class: 'de-head' },
       h('a', { class: 'btn ghost small', href: '#guide', title: 'Back to the Guide', 'aria-label': 'Back to the Guide' }, icon('book'), h('span', { class: 'btn-t', text: 'Guide' })),
       h('h1', { class: 'view-title' }, icon('map', 'title-ico'), h('span', { class: 'title-t', text: 'Edit the line diagram' })),
+      h('label', { class: 'run-pick de-pick', title: 'Which line drawing' }, icon('line'), picker, icon('chevron', 'run-pick-chev')),
+      drawingId !== K3_ID ? [
+        h('button', { type: 'button', class: 'icon-btn small', title: 'Rename this line', 'aria-label': 'Rename this line', onclick: renameIt }, icon('edit')),
+        h('button', { type: 'button', class: 'icon-btn small', title: 'Delete this line drawing', 'aria-label': 'Delete this line drawing', onclick: deleteIt }, icon('trash')),
+      ] : null,
       status,
       h('span', { class: 'grow' }),
       h('button', { type: 'button', class: 'btn ghost small', title: 'Download as PNG', 'aria-label': 'Download as PNG', onclick: exportPng }, icon('download'), h('span', { class: 'btn-t', text: 'PNG' })),
@@ -210,7 +325,7 @@ export function renderDiagramEditor(root) {
       return true;
     },
   };
-  board = createBoard(host, { doc: diagramDoc(), mode: 'edit', zones, onChange: save, library, label: 'K3 line diagram editor' });
+  board = createBoard(host, { doc: diagramDoc(), mode: 'edit', zones, onChange: queueSave, library, label: `${drawingName(drawingId)} line diagram editor` });
   markSaved(isCustomDiagram() ? 'Edited' : 'Default');
   return () => { clearTimeout(saveTimer); flush(); board.destroy(); };
 }

@@ -1,4 +1,5 @@
 // Small DOM helpers. Text always goes in through textContent, never innerHTML.
+import { LUCIDE, LUCIDE_TAGS } from './icons-lib.js';
 
 export function h(tag, attrs = {}, ...kids) {
   const el = document.createElement(tag);
@@ -98,13 +99,54 @@ export const PATHS = {
   filter: 'M3 5h18l-7 8v6l-4 2v-8z',
 };
 
+/** Path data for an app icon or a Lucide icon. */
+export const iconPath = (name) => PATHS[name] || LUCIDE[name] || '';
+export const ICON_NAMES = () => [...new Set([...Object.keys(PATHS), ...Object.keys(LUCIDE)])];
+
+/**
+ * A searchable icon picker in a dialog. Resolves to the chosen name, or null.
+ * `suggested` is shown first and marked.
+ */
+export function pickIcon({ title = 'Choose an icon', current = '', suggested = '' } = {}) {
+  return new Promise((resolve) => {
+    // its own dialog, on top of whatever form asked for it, so that form stays as it was
+    const dlg = h('dialog', { class: 'modal wide ip-dialog', 'aria-label': title });
+    let done = false;
+    const finish = (v) => { if (done) return; done = true; dlg.close(); dlg.remove(); resolve(v); };
+    dlg.addEventListener('close', () => finish(null));
+    dlg.addEventListener('click', (e) => { if (e.target === dlg) finish(null); });
+    const q = h('input', { type: 'search', class: 'ip-search', placeholder: 'Search icons, e.g. robot, water, box', 'aria-label': 'Search icons' });
+    const grid = h('div', { class: 'ip-grid', role: 'listbox', 'aria-label': 'Icons' });
+    const all = ICON_NAMES();
+    const paint = () => {
+      const t = q.value.trim().toLowerCase();
+      const hits = all.filter(n => !t || n.includes(t) || (LUCIDE_TAGS[n] || '').includes(t));
+      const ordered = suggested && hits.includes(suggested) ? [suggested, ...hits.filter(n => n !== suggested)] : hits;
+      clear(grid, ordered.length ? ordered.map(n => h('button', {
+        type: 'button', class: 'ip-btn' + (n === current ? ' on' : '') + (n === suggested ? ' sug' : ''), role: 'option', 'aria-selected': String(n === current), title: n, 'aria-label': n,
+        onclick: () => finish(n),
+      }, icon(n), h('span', { class: 'ip-name', text: n === suggested ? 'Suggested' : n.replace(/-/g, ' ') }))) : h('p', { class: 'muted', text: 'No icon by that name. Try a simpler word.' }));
+    };
+    q.addEventListener('input', paint);
+    dlg.append(h('div', { class: 'ip' },
+      h('div', { class: 'wiz-top' }, h('h2', { text: title }),
+        h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Close', onclick: () => finish(null) }, icon('close'))),
+      q, grid,
+      h('p', { class: 'muted small', text: 'Icons from Lucide (lucide.dev), free under the ISC licence.' })));
+    document.body.append(dlg);
+    dlg.showModal();
+    paint();
+    setTimeout(() => q.focus(), 50);
+  });
+}
+
 export function icon(name, cls = '') {
   const svg = document.createElementNS(SVGNS, 'svg');
   svg.setAttribute('viewBox', '0 0 24 24');
   svg.setAttribute('aria-hidden', 'true');
   svg.setAttribute('class', 'ico ' + cls);
   const p = document.createElementNS(SVGNS, 'path');
-  p.setAttribute('d', PATHS[name] || '');
+  p.setAttribute('d', iconPath(name));
   if (name === 'play' || name === 'stop') p.setAttribute('class', 'fill');
   svg.append(p);
   return svg;
@@ -119,7 +161,20 @@ export function toast(msg, { action, timeout = 4500, tone = '' } = {}) {
     action ? h('button', { class: 'toast-act', type: 'button', onclick: () => { el.hidden = true; action.fn(); } }, action.label) : null);
   el.className = 'toast ' + tone;
   el.hidden = false;
+  homeToast();
   toastTimer = setTimeout(() => { el.hidden = true; }, timeout);
+}
+// An open dialog makes the rest of the page inert, so while one is open the toast (and its
+// Undo) lives inside it, pinned to its bottom; it moves back when the dialog closes.
+function homeToast() {
+  const el = document.getElementById('toast');
+  const dlg = document.getElementById('modal');
+  if (!el || !dlg) return;
+  const target = dlg.open && !el.hidden ? dlg : document.body;
+  if (el.parentElement !== target) target.append(el);
+}
+if (typeof document !== 'undefined') {
+  document.addEventListener('DOMContentLoaded', () => document.getElementById('modal')?.addEventListener('close', () => { const el = document.getElementById('toast'); if (el && el.parentElement !== document.body) document.body.append(el); }));
 }
 
 /* ---------- modal ---------- */
@@ -127,11 +182,14 @@ export function openModal(content, { onClose, label = 'Dialog', wide = false } =
   const dlg = document.getElementById('modal');
   dlg.className = 'modal' + (wide ? ' wide' : '');
   dlg.setAttribute('aria-label', label);
+  const t = document.getElementById('toast');
   clear(dlg, content);
+  if (t && !t.isConnected) dlg.append(t);   // a toast shown over the previous dialog content stays
   const done = () => { dlg.removeEventListener('close', done); onClose?.(); };
   dlg.addEventListener('close', done);
   dlg.onclick = (e) => { if (e.target === dlg) dlg.close(); };
   if (!dlg.open) dlg.showModal();
+  homeToast();
   dlg.scrollTop = 0;
   return () => dlg.open && dlg.close();
 }

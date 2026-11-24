@@ -11,6 +11,7 @@ import { demoRuns, demoLoadedAt, loadOrgDemo, clearOrgDemo } from './demo-org.js
 import { hbars, columns, donut, lines as linesChart, table as itemsTable, pareto, kindSwitch } from './charts.js';
 import { interactive } from './insights.js';
 import { zoneColour } from './colors.js';
+import { zoneIcon, categoryIcon } from './iconmap.js';
 import { h, clear, icon, fmt, toast, confirmBox, infoNote, deliverFile, stamp } from './ui.js';
 
 const COLOUR = {
@@ -124,8 +125,9 @@ function card(title, ico, body, { kinds, kind, onKind, note, cls = '' } = {}) {
     note ? infoNote(note) : null);
 }
 const legend = (items) => h('ul', { class: 'legend' }, items.map(([label, colour]) => h('li', {}, h('span', { class: 'swatch', style: { background: colour } }), h('span', { text: label }))));
-const toItems = (list, { label, colour, rest } = {}) => list.map(v => ({
-  key: v.key, label: label ? label(v) : v.key || 'Not set', value: v.minutes, touches: v.touches, pct: null, colour: colour ? colour(v) : COLOUR.single,
+const withIcon = (ico, text) => h('span', { class: 'bl' }, icon(ico, 'lbl-ico'), h('span', { text }));
+const toItems = (list, { label, colour, rest, rich } = {}) => list.map(v => ({
+  key: v.key, label: label ? label(v) : v.key || 'Not set', rich: rich ? rich(v) : undefined, value: v.minutes, touches: v.touches, pct: null, colour: colour ? colour(v) : COLOUR.single,
   rest: rest ? rest(v) : [`${fmt.int(v.touches)} touches · ${fmt.dec(v.minutes / 60, 1)} h`],
 }));
 
@@ -134,7 +136,7 @@ function children(ds, rows) {
   const runsHere = ds.runs.filter(x => inPath(x) && (inPeriod(x.date) || x.run.touches.some(t => inPeriod((t.start || '').slice(0, 10)))));
   if (S.run) {
     const m = tally(rows, t => t.zone || 'Not set');
-    return { level: 'zone', noun: 'zone', list: [...m.values()].sort((a, b) => b.minutes - a.minutes).map(v => ({ ...v, id: v.key, name: v.key, ico: 'pin', pick: () => toggle('zone', v.key) })) };
+    return { level: 'zone', noun: 'zone', list: [...m.values()].sort((a, b) => b.minutes - a.minutes).map(v => ({ ...v, id: v.key, name: v.key, ico: zoneIcon(v.key), pick: () => toggle('zone', v.key) })) };
   }
   if (S.line) {
     const m = tally(rows, t => t._run);
@@ -432,7 +434,8 @@ export function renderAdmin(root) {
       card('Where the minutes go', 'trend', (() => {
         const items = toItems(catTally, { label: v => CAT_BY_CODE[v.key]?.name || v.key, colour: v => (CAT_BY_CODE[v.key]?.planned ? COLOUR.Planned : COLOUR.Unplanned) });
         const all = [...tally(scoped(ds, 'category'), t => t.category || '').values()].filter(v => v.key).sort((a, b) => b.minutes - a.minutes);
-        const allItems = toItems(all, { label: v => CAT_BY_CODE[v.key]?.name || v.key, colour: v => (CAT_BY_CODE[v.key]?.planned ? COLOUR.Planned : COLOUR.Unplanned) });
+        const allItems = toItems(all, { label: v => CAT_BY_CODE[v.key]?.name || v.key, colour: v => (CAT_BY_CODE[v.key]?.planned ? COLOUR.Planned : COLOUR.Unplanned),
+          rich: v => h('span', { class: 'bl' }, h('span', { class: 'code ' + (CAT_BY_CODE[v.key]?.planned ? 'code-p' : 'code-u'), text: v.key }), icon(categoryIcon(v.key), 'lbl-ico'), h('span', { text: CAT_BY_CODE[v.key]?.short || v.key })) });
         if (!allItems.length) return h('p', { class: 'empty', text: 'Nothing logged in this scope yet.' });
         const ctx = ctxFor('category');
         return K.share === 'donut' ? donut(allItems, ctx, { centre: fmt.dec(total(scoped(ds, 'category')) / 60, 0), caption: 'hours', ariaLabel: 'Minutes by category', maxParts: 6 })
@@ -448,7 +451,7 @@ export function renderAdmin(root) {
       })(), { note: 'Physical touches point to automation; information touches to digitalisation.' }),
       card('By zone / equipment', 'pin', (() => {
         const list = [...tally(scoped(ds, 'zone'), t => t.zone || '').values()].filter(v => v.key).sort((a, b) => b.minutes - a.minutes);
-        const items = toItems(list, { colour: v => zoneColour(v.key) || COLOUR.single });
+        const items = toItems(list, { colour: v => zoneColour(v.key) || COLOUR.single, rich: v => withIcon(zoneIcon(v.key), v.key) });
         if (!items.length) return h('p', { class: 'empty', text: 'Nothing logged yet.' });
         return K.zone === 'columns' ? columns(items.map(i => ({ key: i.key, label: i.label, short: i.label.split(' ')[0], segs: [{ value: i.value, colour: i.colour }], rest: i.rest })), ctxFor('zone'), { xRotate: true })
           : K.zone === 'table' ? itemsTable(items, { label: 'Zone' }) : hbars(items, ctxFor('zone'));

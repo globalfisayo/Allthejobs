@@ -7,6 +7,7 @@ import { registerEditor } from './stopwatch.js';
 import { touchForm } from './form.js';
 import { swipeable } from './swipe.js';
 import { h, clear, icon, toast, openModal, closeModal, fmt } from './ui.js';
+import { zoneIcon, personIcon, categoryIcon, touchTypeIcon } from './iconmap.js';
 
 const filters = { show: 'all', q: '' };
 
@@ -107,8 +108,15 @@ export function renderLog(root, { onChange } = {}) {
       h('span', { class: 'entry-main' },
         h('span', { class: 'entry-title' },
           cat ? h('span', { class: 'code ' + (cat.planned ? 'code-p' : 'code-u'), text: cat.code }) : h('span', { class: 'code code-x', text: '?' }),
+          cat ? h('span', { class: 'entry-cat-ico', title: cat.name }, icon(categoryIcon(cat.code))) : null,
           h('span', { text: t.type || 'Type of touch not set' })),
-        h('span', { class: 'entry-meta', text: [everyRun ? r.name : '', t.zone || 'No zone', t.who, t.touchType, t.observer ? `by ${t.observer}` : ''].filter(Boolean).join(' · ') }),
+        h('span', { class: 'entry-meta' }, [
+          everyRun ? [icon('history'), r.name] : null,
+          [icon(zoneIcon(t.zone)), t.zone || 'No zone'],
+          t.who ? [icon(personIcon(t.who)), t.who] : null,
+          t.touchType ? [icon(touchTypeIcon(t.touchType)), t.touchType] : null,
+          t.observer ? [icon('eye'), `by ${t.observer}`] : null,
+        ].filter(Boolean).map(([ico, text]) => h('span', { class: 'em' }, ico, text))),
         t.description ? h('span', { class: 'entry-desc', text: t.description }) : null,
         t.incomplete ? h('span', { class: 'badge warn', text: 'Needs: ' + missingFields(t).map(m => FIELD_LABEL[m]).join(', ') }) : null),
       h('span', { class: 'entry-dur' },

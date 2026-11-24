@@ -166,4 +166,4 @@ export function nextCategoryCode(planned) {
 
 /** Is the framework in use different from the shipped default? */
 export const isCustomFramework = () => JSON.stringify(CATEGORIES.map(strip)) !== JSON.stringify(sortCategories(JSON.parse(JSON.stringify(DEFAULT_CATEGORIES))).map(strip));
-function strip(c) { return { code: c.code, name: c.name, planned: c.planned, hidden: !!c.hidden, types: c.types.map(t => ({ n: t.name, tt: t.touchType, g: t.guide, h: !!t.hidden, z: [...(t.zones || [])].sort(), e: !!t.everywhere })) }; }
+function strip(c) { return { code: c.code, name: c.name, planned: c.planned, hidden: !!c.hidden, i: c.icon || '', types: c.types.map(t => ({ n: t.name, tt: t.touchType, g: t.guide, h: !!t.hidden, z: [...(t.zones || [])].sort(), e: !!t.everywhere })) }; }

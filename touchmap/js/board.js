@@ -2,7 +2,7 @@
 // colours and dashes, alignment snapping, undo/redo, zoom and pan, PNG/SVG export.
 // Shapes can be grouped (a machine drawn from circles and squares becomes one piece) and a group
 // saved to a shared library. Used for the Guide diagram (full editor) and for chart annotations.
-import { h, clear, icon, toast, PATHS } from './ui.js';
+import { h, clear, icon, toast, iconPath, pickIcon as choose } from './ui.js';
 
 const NS = 'http://www.w3.org/2000/svg';
 const s = (tag, attrs = {}, ...kids) => {
@@ -118,11 +118,58 @@ function ends(line, shapes) {
 }
 function routePoints(line, shapes) {
   const [a, b] = ends(line, shapes);
-  if (line.via?.length) return [a, ...line.via, b];
-  if (line.route !== 'elbow') return [a, b];
+  if (line.via?.length && line.route !== 'elbow' && line.route !== 'rounded') return [a, ...line.via, b];
+  if (line.route !== 'elbow' && line.route !== 'rounded') return [a, b];
   const horiz = a.a ? (a.a === 'e' || a.a === 'w') : Math.abs(b.x - a.x) >= Math.abs(b.y - a.y);
   if (horiz) { const mx = (a.x + b.x) / 2; return [a, { x: mx, y: a.y }, { x: mx, y: b.y }, b]; }
   const my = (a.y + b.y) / 2; return [a, { x: a.x, y: my }, { x: b.x, y: my }, b];
+}
+const DIRS = { n: [0, -1], s: [0, 1], e: [1, 0], w: [-1, 0] };
+const fmtP = (p) => `${+p.x.toFixed(2)} ${+p.y.toFixed(2)}`;
+/**
+ * The SVG path of a line, and the direction it arrives from at each end (for arrowheads).
+ * straight / elbow: a polyline; rounded: an elbow with soft corners; curved: a smooth curve
+ * that leaves and enters each shape square to its edge, through any bend points.
+ */
+function linePath(sh, pts) {
+  const a = pts[0], b = pts[pts.length - 1];
+  if (sh.route === 'curved') {
+    if (pts.length === 2) {
+      const dist = Math.hypot(b.x - a.x, b.y - a.y);
+      const k = Math.max(30, dist * 0.42);
+      const horiz = Math.abs(b.x - a.x) >= Math.abs(b.y - a.y);
+      const dirOf = (p, other, sign) => (p.a && DIRS[p.a]) || (horiz ? [Math.sign(other.x - p.x) * sign || sign, 0] : [0, Math.sign(other.y - p.y) * sign || sign]);
+      const da = dirOf(a, b, 1), db = dirOf(b, a, 1);
+      const c1 = { x: a.x + da[0] * k, y: a.y + da[1] * k }, c2 = { x: b.x + db[0] * k, y: b.y + db[1] * k };
+      return { d: `M${fmtP(a)} C${fmtP(c1)} ${fmtP(c2)} ${fmtP(b)}`, inEnd: c2, inStart: c1 };
+    }
+    // Catmull-Rom through every point, as cubic segments
+    let d = `M${fmtP(a)}`;
+    let inEnd = a, inStart = null;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const p0 = pts[i - 1] || pts[i], p1 = pts[i], p2 = pts[i + 1], p3 = pts[i + 2] || p2;
+      const c1 = { x: p1.x + (p2.x - p0.x) / 6, y: p1.y + (p2.y - p0.y) / 6 }, c2 = { x: p2.x - (p3.x - p1.x) / 6, y: p2.y - (p3.y - p1.y) / 6 };
+      d += ` C${fmtP(c1)} ${fmtP(c2)} ${fmtP(p2)}`;
+      if (i === 0) inStart = c1;
+      inEnd = c2;
+    }
+    return { d, inEnd, inStart };
+  }
+  if (sh.route === 'rounded' && pts.length > 2) {
+    const r = Math.max(6, Math.min(22, (sh.strokeWidth ?? 2) * 4));
+    let d = `M${fmtP(a)}`;
+    for (let i = 1; i < pts.length - 1; i++) {
+      const p = pts[i], prev = pts[i - 1], next = pts[i + 1];
+      const l1 = Math.hypot(p.x - prev.x, p.y - prev.y) || 1, l2 = Math.hypot(next.x - p.x, next.y - p.y) || 1;
+      const rr = Math.min(r, l1 / 2, l2 / 2);
+      const s1 = { x: p.x - ((p.x - prev.x) / l1) * rr, y: p.y - ((p.y - prev.y) / l1) * rr };
+      const s2 = { x: p.x + ((next.x - p.x) / l2) * rr, y: p.y + ((next.y - p.y) / l2) * rr };
+      d += ` L${fmtP(s1)} Q${fmtP(p)} ${fmtP(s2)}`;
+    }
+    d += ` L${fmtP(b)}`;
+    return { d, inEnd: pts[pts.length - 2], inStart: pts[1] };
+  }
+  return { d: 'M' + pts.map(fmtP).join(' L'), inEnd: pts[pts.length - 2], inStart: pts[1] };
 }
 const dashOf = (d, w) => (d === 'dashed' ? `${w * 4} ${w * 3}` : d === 'dotted' ? `0.1 ${Math.max(4, w * 2.5)}` : null);
 /** Chevrons every `gap` units along a polyline, pointing the way it runs (a conveyor's flow). */
@@ -182,14 +229,15 @@ export function drawShape(sh, shapes, { fillFor, inner = false } = {}) {
   }
   if (sh.type === 'line') {
     const pts = routePoints(sh, shapes);
-    const d = 'M' + pts.map(p => `${p.x} ${p.y}`).join(' L');
+    const path = linePath(sh, pts);
+    const d = path.d;
     g.append(s('path', { d, fill: 'none', stroke, 'stroke-width': sw, 'stroke-dasharray': dash, 'stroke-linecap': sh.dash === 'belt' ? 'butt' : 'round', 'stroke-linejoin': 'round', class: cls + (sh.dash === 'belt' ? ' bd-belt' : '') }));
     if (sh.dash === 'belt') {
       g.append(s('path', { d, fill: 'none', stroke: '#FFFFFF', 'stroke-width': Math.max(1.5, sw / 9), 'stroke-dasharray': `${sw / 3} ${sw / 1.8}`, class: 'bd-belt-marks' }));
       g.append(...chevrons(pts, sh.chevronColour || '#6A6A6A'));
     }
-    if (sh.arrowEnd) g.append(arrowHead(pts[pts.length - 1], pts[pts.length - 2], sw, stroke));
-    if (sh.arrowStart) g.append(arrowHead(pts[0], pts[1], sw, stroke));
+    if (sh.arrowEnd) g.append(arrowHead(pts[pts.length - 1], path.inEnd, sw, stroke));
+    if (sh.arrowStart) g.append(arrowHead(pts[0], path.inStart, sw, stroke));
     if (!inner) g.append(s('path', { d, fill: 'none', stroke: 'transparent', 'stroke-width': Math.max(18, sw + 14), class: 'bd-hit' }));
     if (sh.text) {
       const mid = pts[Math.floor(pts.length / 2) - (pts.length % 2 ? 0 : 1)];
@@ -214,7 +262,7 @@ export function drawShape(sh, shapes, { fillFor, inner = false } = {}) {
     if (sw) g.append(s('rect', { x, y, width: w, height: hh, fill: 'none', stroke, 'stroke-width': sw, 'stroke-dasharray': dash, rx: sh.radius ?? 0 }));
   } else if (sh.type === 'icon') {
     const svgIcon = s('svg', { x, y, width: w, height: hh, viewBox: '0 0 24 24', overflow: 'visible' },
-      s('path', { d: PATHS[sh.icon] || PATHS.info, fill: 'none', stroke: sh.stroke || '#141414', 'stroke-width': Math.max(0.5, (sh.strokeWidth ?? 2)), 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }));
+      s('path', { d: iconPath(sh.icon) || iconPath('info'), fill: 'none', stroke: sh.stroke || '#141414', 'stroke-width': Math.max(0.5, (sh.strokeWidth ?? 2)), 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }));
     g.append(svgIcon);
   }
   // hit area for text, icons and images
@@ -261,12 +309,74 @@ export function createBoard(host, opts) {
   const gUi = s('g', { class: 'bd-ui' });
   svg.append(gGrid, gShapes, gUi);
   const textEdit = h('textarea', { class: 'bd-text-edit', hidden: true, 'aria-label': 'Shape text' });
-  const stage = h('div', { class: 'bd-stage' }, svg, textEdit);
-  const props = h('aside', { class: 'bd-props', 'aria-label': 'Shape properties' });
+  // How to use it sits behind a "?" in the corner, so the canvas keeps the room
+  const help = edit && !opts.overlay ? h('div', { class: 'bd-help' },
+    h('button', { type: 'button', class: 'bd-help-btn', 'aria-label': 'How to draw', 'aria-expanded': 'false' }, icon('circle-question-mark')),
+    h('div', { class: 'bd-help-pop', role: 'tooltip' },
+      h('p', { text: 'Pick a tool and drag on the canvas. Lines and arrows snap to the dots on a shape and follow it when it moves. Double-tap a shape to type in it. Paste an image or text straight in.' }),
+      h('p', { text: 'Select several shapes and Group them to make one piece, like a machine; save a group to the Library so your team can reuse it. Drag the small square in the middle of a line to bend it.' }),
+      h('p', { text: 'Two fingers (or the hand tool) to pan; pinch or Ctrl + scroll to zoom. Shift keeps proportions. Esc leaves full screen.' }))) : null;
+  if (help) {
+    const btn = help.querySelector('.bd-help-btn');
+    btn.addEventListener('click', () => { const on = !help.classList.contains('open'); help.classList.toggle('open', on); btn.setAttribute('aria-expanded', String(on)); });
+    document.addEventListener('pointerdown', (e) => { if (!help.contains(e.target)) { help.classList.remove('open'); btn.setAttribute('aria-expanded', 'false'); } }, true);
+  }
+  const stage = h('div', { class: 'bd-stage' }, svg, textEdit, help);
+  const props = h('aside', { class: 'bd-props', 'aria-label': 'Shape properties', hidden: true });
   const toolbar = h('div', { class: 'bd-toolbar', role: 'toolbar', 'aria-label': 'Drawing tools' });
+  const tipEl = h('div', { class: 'bd-tip', role: 'tooltip', hidden: true });
   const root = h('div', { class: 'board ' + (edit ? 'edit' : 'view') + (opts.overlay ? ' overlay' : '') + (opts.compact ? ' compact' : '') },
-    edit ? toolbar : null, h('div', { class: 'bd-main' }, stage, edit ? props : null));
+    edit ? toolbar : null, h('div', { class: 'bd-main' }, stage, edit ? props : null), edit ? tipEl : null);
   clear(host, root);
+
+  /* tool names on hover; what a tool does on hover of its "i" */
+  let tipHide = 0;
+  const hideTip = () => { tipHide = setTimeout(() => { tipEl.hidden = true; tipEl.classList.remove('more'); }, 220); };
+  function showTip(btn, name, desc) {
+    clearTimeout(tipHide);
+    clear(tipEl, h('span', { class: 'bd-tip-row' }, h('span', { class: 'bd-tip-name', text: name }),
+      desc ? h('span', { class: 'bd-tip-i', tabindex: '0', role: 'button', 'aria-label': `What ${name} does` }, icon('info')) : null),
+      desc ? h('span', { class: 'bd-tip-desc', text: desc }) : null);
+    tipEl.classList.remove('more');
+    tipEl.hidden = false;
+    // the description opens on the "i" and stays while the pointer is in the tip
+    const i = tipEl.querySelector('.bd-tip-i');
+    if (i) for (const ev of ['pointerenter', 'focus', 'click']) i.addEventListener(ev, () => tipEl.classList.add('more'));
+    const r = btn.getBoundingClientRect(), rr = root.getBoundingClientRect();
+    const w = tipEl.offsetWidth;
+    tipEl.style.left = `${Math.max(4, Math.min(rr.width - w - 4, r.left - rr.left + r.width / 2 - w / 2))}px`;
+    tipEl.style.top = `${r.bottom - rr.top + 6}px`;
+  }
+  tipEl.addEventListener('pointerenter', () => clearTimeout(tipHide));
+  tipEl.addEventListener('pointerleave', hideTip);
+  /** A toolbar button: its name shows on hover, its description behind the tip's "i". */
+  function tb(name, desc, content, onclick, { on = false, cls = '', pressed = null } = {}) {
+    const b = h('button', { type: 'button', class: 'bd-tool' + (on ? ' on' : '') + (cls ? ' ' + cls : ''), 'aria-label': name, 'aria-pressed': pressed == null ? null : String(pressed), onclick }, content);
+    b.addEventListener('pointerenter', (e) => { if (e.pointerType === 'mouse') showTip(b, name, desc); });
+    b.addEventListener('pointerleave', hideTip);
+    b.addEventListener('focus', () => { if (b.matches(':focus-visible')) showTip(b, name, desc); });
+    b.addEventListener('blur', hideTip);
+    b.addEventListener('click', () => { tipEl.hidden = true; });
+    return b;
+  }
+
+  /* full screen: the board fills the screen (and the display, where the browser allows) */
+  let fullscreen = false;
+  function setFullscreen(on) {
+    fullscreen = on;
+    root.classList.toggle('fs', on);
+    document.body.classList.toggle('board-fs', on);
+    const el = root;
+    try {
+      if (on && !document.fullscreenElement) (el.requestFullscreen || el.webkitRequestFullscreen)?.call(el)?.catch?.(() => {});
+      if (!on && (document.fullscreenElement || document.webkitFullscreenElement)) (document.exitFullscreen || document.webkitExitFullscreen)?.call(document)?.catch?.(() => {});
+    } catch { /* the CSS version still applies */ }
+    paintToolbar();
+    requestAnimationFrame(() => { if (!opts.overlay) fit(); else render(); opts.onFullscreen?.(on); });
+  }
+  const onFsChange = () => { if (fullscreen && !(document.fullscreenElement || document.webkitFullscreenElement)) { fullscreen = false; root.classList.remove('fs'); document.body.classList.remove('board-fs'); paintToolbar(); requestAnimationFrame(() => (opts.overlay ? render() : fit())); opts.onFullscreen?.(false); } };
+  document.addEventListener('fullscreenchange', onFsChange);
+  document.addEventListener('webkitfullscreenchange', onFsChange);
 
   const setViewBox = () => svg.setAttribute('viewBox', `${view.x} ${view.y} ${view.w} ${view.h}`);
   setViewBox();
@@ -327,7 +437,7 @@ export function createBoard(host, opts) {
       if (sh.type === 'line') {
         const [a, b] = ends(sh, shapes);
         for (const [p, which] of [[a, 'from'], [b, 'to']]) gUi.append(s('circle', { cx: p.x, cy: p.y, r: 7 * k, class: 'bd-handle end' + (sh[which] ? ' attached' : ''), 'data-handle': which, 'data-for': sh.id, 'stroke-width': 2 * k }));
-        if (sel.size === 1 && sh.route !== 'elbow') {
+        if (sel.size === 1 && sh.route !== 'elbow' && sh.route !== 'rounded') {
           // drag a small square to bend the line; drag a bend to move it
           const pts = routePoints(sh, shapes);
           (sh.via || []).forEach((p, i) => gUi.append(s('rect', { x: p.x - 6 * k, y: p.y - 6 * k, width: 12 * k, height: 12 * k, rx: 6 * k, class: 'bd-handle via', 'data-handle': `via:${i}`, 'data-for': sh.id, 'stroke-width': 2 * k })));
@@ -427,9 +537,9 @@ export function createBoard(host, opts) {
       drag = { kind: 'create', id: sh.id, x0: sh.x, y0: sh.y };
       render(); return;
     }
-    if (tool === 'line' || tool === 'arrow') {
+    if (tool === 'line' || tool === 'arrow' || tool === 'curve') {
       const sn = snapAnchor(p);
-      const sh = { id: newId(), type: 'line', x1: sn ? sn.p.x : snapV(p.x), y1: sn ? sn.p.y : snapV(p.y), x2: p.x, y2: p.y, from: sn ? { id: sn.id, anchor: sn.anchor } : null, to: null, stroke: lastStroke, strokeWidth: 2, arrowEnd: tool === 'arrow', route: 'straight' };
+      const sh = { id: newId(), type: 'line', x1: sn ? sn.p.x : snapV(p.x), y1: sn ? sn.p.y : snapV(p.y), x2: p.x, y2: p.y, from: sn ? { id: sn.id, anchor: sn.anchor } : null, to: null, stroke: lastStroke, strokeWidth: 2, arrowEnd: tool !== 'line', route: tool === 'curve' ? 'curved' : 'straight' };
       shapes.push(sh); sel = new Set([sh.id]);
       drag = { kind: 'end', id: sh.id, which: 'to' };
       render(); return;
@@ -482,7 +592,7 @@ export function createBoard(host, opts) {
     }
     const p = toSvg(e);
     if (!drag) {
-      if ((tool === 'line' || tool === 'arrow')) { const sn = snapAnchor(p); hoverAnchor = sn ? { id: sn.id, anchor: sn.anchor } : null; schedule(); }
+      if (tool === 'line' || tool === 'arrow' || tool === 'curve') { const sn = snapAnchor(p); hoverAnchor = sn ? { id: sn.id, anchor: sn.anchor } : null; schedule(); }
       if (marquee) { marquee.x1 = p.x; marquee.y1 = p.y; schedule(); }
       return;
     }
@@ -775,15 +885,9 @@ export function createBoard(host, opts) {
     input.addEventListener('change', () => { const f = input.files?.[0]; if (f) addImage(f); input.remove(); });
     document.body.append(input); input.click();
   }
-  function pickIcon(anchorBtn) {
-    const pop = h('div', { class: 'bd-pop', role: 'dialog', 'aria-label': 'Icons' },
-      Object.keys(PATHS).map(name => h('button', { type: 'button', class: 'bd-icon-btn', title: name, 'aria-label': name, onclick: () => { pop.remove(); addShape({ type: 'icon', icon: name, w: 48, h: 48, stroke: lastStroke === '#141414' ? '#F40009' : lastStroke, strokeWidth: 2 }); } }, icon(name))));
-    root.append(pop);
-    const r = anchorBtn.getBoundingClientRect(), rr = root.getBoundingClientRect();
-    pop.style.left = `${Math.max(0, Math.min(rr.width - 300, r.left - rr.left))}px`;
-    pop.style.top = `${r.bottom - rr.top + 6}px`;
-    const close = (e) => { if (!pop.contains(e.target) && e.target !== anchorBtn) { pop.remove(); document.removeEventListener('pointerdown', close, true); } };
-    setTimeout(() => document.addEventListener('pointerdown', close, true), 0);
+  async function pickIcon() {
+    const name = await choose({ title: 'Add an icon' });
+    if (name) addShape({ type: 'icon', icon: name, w: 48, h: 48, stroke: lastStroke === '#141414' ? '#F40009' : lastStroke, strokeWidth: 2 });
   }
   function zoom(f, cx, cy) {
     const nw = view.w * f, nh = view.h * f;
@@ -822,7 +926,7 @@ export function createBoard(host, opts) {
     if (mod && e.key.toLowerCase() === 'a') { e.preventDefault(); sel = new Set(shapes.map(x => x.id)); render(); paintProps(); return; }
     if (mod && e.key.toLowerCase() === 'c') { if (sel.size) { clipboard = clone(selected()); } return; }
     if (e.key === 'Delete' || e.key === 'Backspace') { if (sel.size) { e.preventDefault(); remove(); } return; }
-    if (e.key === 'Escape') { sel = new Set(); tool = 'select'; paintToolbar(); render(); paintProps(); return; }
+    if (e.key === 'Escape') { if (fullscreen && !sel.size) { setFullscreen(false); return; } sel = new Set(); tool = 'select'; paintToolbar(); render(); paintProps(); return; }
     if (e.key === 'Enter' && sel.size === 1) { e.preventDefault(); showTextEdit(selected()[0]); return; }
     if (e.key.startsWith('Arrow') && sel.size) {
       e.preventDefault();
@@ -833,7 +937,7 @@ export function createBoard(host, opts) {
       return;
     }
     if (!mod && !e.altKey) {
-      const map = { v: 'select', h: 'hand', r: 'rect', o: 'ellipse', t: 'text', l: 'line', a: 'arrow' };
+      const map = { v: 'select', h: 'hand', r: 'rect', o: 'ellipse', t: 'text', l: 'line', a: 'arrow', c: 'curve' };
       if (map[e.key.toLowerCase()]) { tool = map[e.key.toLowerCase()]; paintToolbar(); }
     }
   }
@@ -870,11 +974,17 @@ export function createBoard(host, opts) {
 
   /* ----- toolbar ----- */
   const TOOLS = [
-    ['select', 'Select (V)', toolIcon('M5 3l14 8-6 2-3 6z')], ['hand', 'Pan (H, or drag with two fingers)', toolIcon('M8 13V5.5a1.5 1.5 0 0 1 3 0V12M11 11.5v-7a1.5 1.5 0 0 1 3 0V12M14 6.5a1.5 1.5 0 0 1 3 0V13M17 8.5a1.5 1.5 0 0 1 3 0V15a7 7 0 0 1-7 7h-1a6 6 0 0 1-5-2.7L4 15.5a1.6 1.6 0 0 1 2.6-1.9L8 15.5')],
-    ['rect', 'Rectangle (R)', toolIcon('M4 6h16v12H4z')], ['ellipse', 'Circle / ellipse (O)', toolIcon('M12 20a8 8 0 1 0 0-16 8 8 0 0 0 0 16z')],
-    ['triangle', 'Triangle', toolIcon('M12 4l9 16H3z')], ['diamond', 'Diamond (decision)', toolIcon('M12 3l9 9-9 9-9-9z')],
-    ['hopper', 'Hopper / trapezoid', toolIcon('M3 6h18l-4 12H7z')], ['text', 'Text (T)', toolIcon('M5 6V4h14v2M12 4v16M9 20h6')],
-    ['line', 'Line (L): snaps to shapes', toolIcon('M5 19L19 5')], ['arrow', 'Arrow (A): snaps to shapes', toolIcon('M5 19L19 5M10 5h9v9')],
+    ['select', 'Select (V)', 'Tap a shape to select it and drag to move it. Drag on empty space to select several. Double-tap a shape to type in it.', 'M5 3l14 8-6 2-3 6z'],
+    ['hand', 'Pan (H)', 'Drag to move around the drawing. Two fingers do the same on a tablet.', 'M8 13V5.5a1.5 1.5 0 0 1 3 0V12M11 11.5v-7a1.5 1.5 0 0 1 3 0V12M14 6.5a1.5 1.5 0 0 1 3 0V13M17 8.5a1.5 1.5 0 0 1 3 0V15a7 7 0 0 1-7 7h-1a6 6 0 0 1-5-2.7L4 15.5a1.6 1.6 0 0 1 2.6-1.9L8 15.5'],
+    ['rect', 'Rectangle (R)', 'Drag to draw a box: a machine, an area or a note. Shift keeps it square.', 'M4 6h16v12H4z'],
+    ['ellipse', 'Circle (O)', 'Drag to draw a circle or an ellipse, like a filler or a star wheel. Shift keeps it round.', 'M12 20a8 8 0 1 0 0-16 8 8 0 0 0 0 16z'],
+    ['triangle', 'Triangle', 'Drag to draw a triangle, for a warning or a direction.', 'M12 4l9 16H3z'],
+    ['diamond', 'Diamond', 'Drag to draw a diamond, the flowchart sign for a decision.', 'M12 3l9 9-9 9-9-9z'],
+    ['hopper', 'Hopper', 'Drag to draw a trapezoid, for hoppers and funnels.', 'M3 6h18l-4 12H7z'],
+    ['text', 'Text (T)', 'Tap or drag to add a label, then type.', 'M5 6V4h14v2M12 4v16M9 20h6'],
+    ['line', 'Line (L)', 'Drag from shape to shape. The ends snap to the dots on a shape and follow it when it moves.', 'M5 19L19 5'],
+    ['arrow', 'Arrow (A)', 'A line with an arrowhead, for flow between machines. Snaps to shapes like a line.', 'M5 19L19 5M10 5h9v9'],
+    ['curve', 'Curved arrow (C)', 'An arrow that bends in a smooth curve between shapes. Drag its middle square to shape the bend.', 'M4 19c0-8 6-14 15-14M13 3l6 2-2 6'],
   ];
   function toolIcon(d) { const el = document.createElementNS(NS, 'svg'); el.setAttribute('viewBox', '0 0 24 24'); el.setAttribute('class', 'ico'); el.append(s('path', { d })); return el; }
   const zoomLabel = h('span', { class: 'bd-zoom' });
@@ -882,24 +992,26 @@ export function createBoard(host, opts) {
   function paintToolbar() {
     if (!edit) return;
     svg.dataset.tool = tool;
+    const skip = opts.overlay ? new Set(['hand', 'hopper', 'diamond']) : new Set();
     clear(toolbar,
-      h('div', { class: 'bd-group' }, TOOLS.filter(([k]) => !(opts.overlay && (k === 'hand' || k === 'hopper' || k === 'diamond'))).map(([k, label, ico]) => h('button', {
-        type: 'button', class: 'bd-tool' + (tool === k ? ' on' : ''), title: label, 'aria-label': label, 'aria-pressed': String(tool === k),
-        onclick: () => { tool = k; paintToolbar(); },
-      }, ico.cloneNode(true)))),
+      h('div', { class: 'bd-group' }, TOOLS.filter(([k]) => !skip.has(k)).map(([k, name, desc, d]) =>
+        tb(name, desc, toolIcon(d), () => { tool = k; paintToolbar(); }, { on: tool === k, pressed: tool === k }))),
       h('div', { class: 'bd-group' },
-        h('button', { type: 'button', class: 'bd-tool', title: 'Add an image (or paste one)', 'aria-label': 'Add an image', onclick: pickImage }, icon('upload')),
-        (() => { const b = h('button', { type: 'button', class: 'bd-tool', title: 'Add an icon', 'aria-label': 'Add an icon' }, icon('zap')); b.addEventListener('click', () => pickIcon(b)); return b; })(),
-        opts.library ? (() => { const b = h('button', { type: 'button', class: 'bd-tool bd-lib-tool', title: 'Shape library: machines and your team’s saved shapes', 'aria-label': 'Shape library' }, icon('shapes'), h('span', { class: 'bd-tool-t', text: 'Library' })); b.addEventListener('click', () => pickLibrary(b)); return b; })() : null),
+        tb('Image', 'Add a photo or picture from this device. You can also paste one straight onto the canvas.', icon('upload'), pickImage),
+        tb('Icon', 'Pick from more than 200 icons: machines, people, safety, quality and more.', icon('zap'), () => pickIcon()),
+        opts.library ? (() => { const b = tb('Library', 'The K3 machines and your team’s saved shapes. Tap one to add it.', [icon('shapes'), h('span', { class: 'bd-tool-t', text: 'Library' })], null, { cls: 'bd-lib-tool' }); b.addEventListener('click', () => pickLibrary(b)); return b; })() : null),
       h('div', { class: 'bd-group' },
-        h('button', { type: 'button', class: 'bd-tool', title: 'Undo (Ctrl/Cmd+Z)', 'aria-label': 'Undo', onclick: undoIt }, toolIcon('M9 14L4 9l5-5M4 9h11a5 5 0 0 1 0 10h-3')),
-        h('button', { type: 'button', class: 'bd-tool', title: 'Redo', 'aria-label': 'Redo', onclick: redoIt }, toolIcon('M15 14l5-5-5-5M20 9H9a5 5 0 0 0 0 10h3'))),
+        tb('Undo (Ctrl/Cmd+Z)', 'Step back one change.', toolIcon('M9 14L4 9l5-5M4 9h11a5 5 0 0 1 0 10h-3'), undoIt),
+        tb('Redo', 'Bring back what you undid.', toolIcon('M15 14l5-5-5-5M20 9H9a5 5 0 0 0 0 10h3'), redoIt)),
       opts.overlay ? null : h('div', { class: 'bd-group' },
-        h('button', { type: 'button', class: 'bd-tool', title: 'Zoom out', 'aria-label': 'Zoom out', onclick: () => zoom(1.25) }, icon('minus')),
+        tb('Zoom out', 'See more of the drawing.', icon('minus'), () => zoom(1.25)),
         zoomLabel,
-        h('button', { type: 'button', class: 'bd-tool', title: 'Zoom in', 'aria-label': 'Zoom in', onclick: () => zoom(0.8) }, icon('plus')),
-        h('button', { type: 'button', class: 'bd-tool', title: 'Fit to screen', 'aria-label': 'Fit', onclick: fit }, toolIcon('M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5')),
-        h('button', { type: 'button', class: 'bd-tool' + (grid ? ' on' : ''), title: 'Grid and snapping', 'aria-label': 'Grid', 'aria-pressed': String(grid), onclick: () => { grid = !grid; paintToolbar(); render(); } }, icon('grid'))),
+        tb('Zoom in', 'Look closer.', icon('plus'), () => zoom(0.8)),
+        tb('Fit to screen', 'Show the whole drawing.', toolIcon('M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5'), fit),
+        tb('Grid and snapping', 'Dots to line things up. Shapes snap to them and to each other’s edges and centres.', icon('grid'), () => { grid = !grid; paintToolbar(); render(); }, { on: grid, pressed: grid })),
+      opts.overlay ? null : h('div', { class: 'bd-group' },
+        tb(fullscreen ? 'Leave full screen (Esc)' : 'Full screen', fullscreen ? 'Back to the page.' : 'Use the whole screen for drawing. Esc, or this button again, brings you back.',
+          toolIcon(fullscreen ? 'M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5' : 'M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5M9 9h6v6H9z'), () => setFullscreen(!fullscreen), { on: fullscreen, cls: 'bd-fs-btn' })),
       opts.extraTools ? h('div', { class: 'bd-group bd-extra' }, opts.extraTools) : null);
     paintZoom();
   }
@@ -921,13 +1033,10 @@ export function createBoard(host, opts) {
   function paintProps() {
     if (!edit) return;
     const list = selected();
-    if (!list.length) {
-      clear(props, h('div', { class: 'bd-props-empty' },
-        h('p', { class: 'muted small' }, icon('info'), ' Pick a tool and drag on the canvas. Lines and arrows snap to the dots on a shape and follow it when it moves. Double-tap a shape to type in it. Paste an image or text straight in.'),
-        h('p', { class: 'muted small', text: 'Select several shapes and Group them to make one piece, like a machine; save a group to the Library so your team can reuse it. Drag the small square in the middle of a line to bend it.' }),
-        h('p', { class: 'muted small', text: 'Two fingers (or the hand tool) to pan; pinch or Ctrl + scroll to zoom. Shift keeps proportions.' })));
-      return;
-    }
+    // the panel floats over the canvas, and only while something is selected
+    props.hidden = !list.length;
+    root.classList.toggle('has-sel', !!list.length);
+    if (!list.length) { clear(props); return; }
     const sh = list[0];
     const isLine = list.every(x => x.type === 'line');
     const isGroup = list.length === 1 && sh.type === 'group';
@@ -946,7 +1055,9 @@ export function createBoard(host, opts) {
     const libName = h('input', { type: 'text', class: 'bd-lib-in', placeholder: 'Name, e.g. Filler', 'aria-label': 'Name in the library', maxlength: '60', value: sh.name || sh.zone || '' });
     const canGroup = list.length > 1;
     clear(props,
-      h('div', { class: 'bd-props-head' }, h('strong', { text: list.length > 1 ? `${list.length} selected` : labelOf(sh) }),
+      h('div', { class: 'bd-props-title' }, h('strong', { text: list.length > 1 ? `${list.length} selected` : labelOf(sh) }),
+        h('button', { type: 'button', class: 'icon-btn small', title: 'Close (Esc)', 'aria-label': 'Close the panel', onclick: () => { sel = new Set(); render(); paintProps(); } }, icon('close'))),
+      h('div', { class: 'bd-props-head' },
         h('div', { class: 'row-gap' },
           canGroup ? h('button', { type: 'button', class: 'icon-btn small', title: 'Group (Ctrl/Cmd+G)', 'aria-label': 'Group', onclick: groupSelected }, icon('group')) : null,
           isGroup ? h('button', { type: 'button', class: 'icon-btn small', title: 'Ungroup (Ctrl/Cmd+Shift+G)', 'aria-label': 'Ungroup', onclick: ungroupSelected }, icon('ungroup')) : null,
@@ -969,7 +1080,7 @@ export function createBoard(host, opts) {
         (v) => each('body', x => { x.dash = v; if (v === 'belt' && x.type === 'line' && (x.strokeWidth ?? 2) < 10) { x.strokeWidth = 16; if (x.stroke === '#141414') x.stroke = '#DCDCD8'; } }))) : null,
       isLine ? [
         row('Ends', seg([['none', 'None'], ['end', '→'], ['both', '↔']], sh.arrowStart && sh.arrowEnd ? 'both' : sh.arrowEnd ? 'end' : 'none', (v) => update(x => { x.arrowEnd = v !== 'none'; x.arrowStart = v === 'both'; }))),
-        row('Route', seg([['straight', 'Straight'], ['elbow', 'Elbow']], sh.route || 'straight', (v) => update(x => { x.route = v; if (v === 'elbow') delete x.via; })),
+        row('Route', seg([['straight', 'Straight'], ['elbow', 'Elbow'], ['rounded', 'Rounded'], ['curved', 'Curved']], sh.route || 'straight', (v) => update(x => { x.route = v; if (v === 'elbow' || v === 'rounded') delete x.via; })),
           sh.via?.length ? h('button', { type: 'button', class: 'link-btn small', onclick: () => update(x => { delete x.via; }) }, icon('close'), 'Remove bends') : null),
       ] : null,
       body.type === 'rect' || body.type === 'image' ? row('Corners', range(0, 60, 2, body.radius ?? 0, (v) => each('body', x => { x.radius = v; }))) : null,
@@ -983,7 +1094,31 @@ export function createBoard(host, opts) {
       ] : null,
       row('Opacity', range(0.1, 1, 0.05, sh.opacity ?? 1, (v) => update(x => { x.opacity = v; }))),
       zoneSel ? row('Zone link', zoneSel, h('span', { class: 'muted small', text: 'Tapping it in the Guide opens that zone.' })) : null,
+      list.length === 1 && sh.zone && sh.type !== 'line' ? row('Number', numberBox(sh)) : null,
       isLine && (sh.from || sh.to) ? h('button', { type: 'button', class: 'link-btn small', onclick: () => update(x => { if (x.type === 'line') { const [a, b] = ends(x, shapes); Object.assign(x, { x1: a.x, y1: a.y, x2: b.x, y2: b.y, from: null, to: null }); } }) }, icon('close'), 'Detach from shapes') : null);
+  }
+  /** Equipment number: type one, or swap with the shape that has it; Renumber closes gaps. */
+  function numberBox(sh) {
+    const zoned = () => shapes.filter(x => x.zone && x.type !== 'line');
+    const inp = h('input', { type: 'number', min: '1', max: '99', class: 'bd-num-in', value: sh.num ?? '', 'aria-label': 'Equipment number' });
+    inp.addEventListener('change', () => {
+      const n = Math.max(1, Math.min(99, Math.round(Number(inp.value)) || 0));
+      if (!n) return;
+      const other = zoned().find(x => x !== sh && x.num === n);
+      if (other) other.num = sh.num ?? undefined;
+      sh.num = n;
+      render(); paintProps(); commit();
+    });
+    const renumber = () => {
+      const list = zoned();
+      // numbered ones keep their order; the rest follow, top to bottom, left to right
+      list.sort((a, b) => (a.num ?? 1e9) - (b.num ?? 1e9) || (a.y - b.y) || (a.x - b.x));
+      list.forEach((x, i) => { x.num = i + 1; });
+      render(); paintProps(); commit();
+      toast(`Numbered 1 to ${list.length}.`);
+    };
+    return [inp, h('button', { type: 'button', class: 'btn ghost small', onclick: renumber }, icon('hash'), 'Renumber all'),
+      h('span', { class: 'muted small', text: 'Shown on the Guide’s black badges. A number already used swaps places.' })];
   }
   const labelOf = (sh) => (sh.type === 'group' ? (sh.name || 'Group') : ({ rect: 'Rectangle', ellipse: 'Ellipse', triangle: 'Triangle', diamond: 'Diamond', hopper: 'Hopper', text: 'Text', line: sh.dash === 'belt' ? 'Conveyor' : sh.arrowEnd ? 'Arrow' : 'Line', image: 'Image', icon: 'Icon', path: 'Drawing' })[sh.type]) + (sh.zone && sh.zone !== sh.name ? ` · ${sh.zone}` : '');
 
@@ -1017,7 +1152,11 @@ export function createBoard(host, opts) {
     doc: () => ({ ...doc, shapes: clone(shapes) }),
     setShapes(next) { shapes = clone(next); sel = new Set(); render(); paintProps(); undo.length = 0; undo.push(JSON.stringify(shapes)); },
     render, fit, exportPng, svgString,
+    setFullscreen,
     destroy() {
+      if (fullscreen) setFullscreen(false);
+      document.removeEventListener('fullscreenchange', onFsChange);
+      document.removeEventListener('webkitfullscreenchange', onFsChange);
       window.removeEventListener('keydown', onKey);
       window.removeEventListener('keyup', onKeyUp);
       document.removeEventListener('paste', onPaste);

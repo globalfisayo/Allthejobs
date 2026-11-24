@@ -111,9 +111,9 @@ export function renderWelcome(root, { onDone }) {
   const cont = (i) => h('div', { class: 'ob-foot' },
     h('button', { type: 'button', class: 'btn primary', disabled: !done(STEPS[i].key), onclick: () => nextFrom(i) }, 'Continue', icon('chevronRight')));
 
-  function card({ id, title, sub, ico, on, disabled, tag, onPick }) {
+  function card({ id, title, sub, ico, on, disabled, tag, onPick, soft = false }) {
     return h('button', {
-      type: 'button', class: 'ob-card' + (on ? ' on' : '') + (disabled ? ' off' : ''), 'aria-pressed': String(!!on), 'aria-disabled': disabled ? 'true' : null, 'data-id': id,
+      type: 'button', class: 'ob-card' + (on ? ' on' : '') + (disabled ? ' off' : '') + (soft ? ' soft' : ''), 'aria-pressed': String(!!on), 'aria-disabled': disabled ? 'true' : null, 'data-id': id,
       onclick: () => { if (!disabled) onPick(); },
     },
     h('span', { class: 'ob-ico' }, icon(ico)),
@@ -124,10 +124,23 @@ export function renderWelcome(root, { onDone }) {
 
   function body(k) {
     if (k === 'bu') {
-      return h('div', {}, h('div', { class: 'ob-cards' }, ORG.units.map(u => card({
-        id: u.id, title: u.name, sub: `${u.plants.length} plants`, ico: 'globe', on: model.bu === u.id,
-        onPick: () => { if (model.bu !== u.id) { model.bu = u.id; model.plant = ''; model.line = ''; } nextFrom(0); },
-      }))), cont(0));
+      // live units and the next three in colour; every other business unit behind "See all", in grey
+      const shown = ORG.units.filter(u => u.plants.length || u.featured);
+      const rest = ORG.units.filter(u => !u.plants.length && !u.featured);
+      const buCard = (u) => {
+        const live = u.plants.some(p => p.live);
+        return card({
+          id: u.id, title: u.name, sub: u.plants.length ? `${u.plants.length} plants` : 'Plants to come', ico: 'globe', on: model.bu === u.id,
+          disabled: !live, tag: live ? null : 'Coming soon', soft: u.featured,
+          onPick: () => { if (model.bu !== u.id) { model.bu = u.id; model.plant = ''; model.line = ''; } nextFrom(0); },
+        });
+      };
+      return h('div', {},
+        h('div', { class: 'ob-cards' }, shown.map(buCard)),
+        rest.length ? h('details', { class: 'ob-more' },
+          h('summary', {}, icon('chevron', 'ob-more-chev'), `See all ${ORG.units.length} business units`),
+          h('div', { class: 'ob-cards' }, rest.map(buCard))) : null,
+        cont(0));
     }
     if (k === 'plant') {
       const unit = unitById(model.bu);
@@ -210,7 +223,7 @@ export function renderWelcome(root, { onDone }) {
         brandMark(),
         h('div', { class: 'grow' }, h('h1', { text: p.at ? 'Your profile' : 'Set up your profile' }), progress),
         p.at ? h('a', { class: 'btn ghost small', href: '#setup' }, icon('close'), 'Cancel')
-          : h('button', { type: 'button', class: 'btn ghost small', onclick: () => { signOut(); location.hash = '#login'; location.reload(); } }, icon('logout'), 'Sign out')),
+          : h('button', { type: 'button', class: 'btn ghost small', onclick: () => { signOut(); location.hash = '#login'; location.reload(); } }, icon('logout'), 'Log out')),
       h('p', { class: 'ob-intro muted' }, 'Pick where you map touches. Every touch you log is tagged with this plant and line, so each site sees its own numbers and the business unit can compare them.'),
       stepsEl)));
   paint();
