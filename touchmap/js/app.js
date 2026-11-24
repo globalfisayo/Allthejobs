@@ -51,6 +51,7 @@ function gate(r) {
   if (!session()) return 'login';
   if (r === 'login') return isAdmin() || state.profile?.at ? 'capture' : 'welcome';
   if (r === 'admin' && !isAdmin()) return 'capture';
+  if (r === 'diagram' && !isAdmin()) return 'guide';
   if (!isAdmin() && !state.profile?.at) return 'welcome';
   return r;
 }

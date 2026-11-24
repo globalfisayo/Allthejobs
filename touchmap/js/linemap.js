@@ -8,9 +8,10 @@ import { h, clear, icon, iconPath, toast, openModal, closeModal, confirmBox, fmt
 import { createBoard, bodyBox } from './board.js';
 import { diagramDoc, defaultDiagram, zonesOnDiagram, zoneNumbers, drawingName, drawingOptions, currentDrawingId, useDrawing } from './diagram.js';
 import { zoneColour } from './colors.js';
-import { zoneIcon, categoryIcon, touchTypeIcon } from './iconmap.js';
+import { zoneIcon, categoryIcon, touchTypeIcon, personIcon } from './iconmap.js';
 import { editFramework, usage, typeEditor } from './setup.js';
 import { applyFramework } from './framework.js';
+import { isAdmin } from './auth.js';
 
 import { ZONE_INFO, ON_EVERY_MACHINE } from './zonemap.js';
 export { ZONE_INFO, ON_EVERY_MACHINE };
@@ -123,6 +124,7 @@ async function reclassify(code, name, to, zone) {
 
 /* ---------- popup ---------- */
 export function openZone(zone, { editing = false } = {}) {
+  editing = editing && isAdmin();
   const info = { ...(ZONE_INFO[zone] || { machine: true, blurb: 'An area added in Setup.' }), types: typesAt(zone) };
   const here = loggedAt(zone);
   const num = zoneNumbers()[zone];
@@ -176,7 +178,7 @@ export function openZone(zone, { editing = false } = {}) {
         h('span', { class: 'zp-ico' }, icon(zoneIcon(zone))),
         h('div', {}, h('h2', {}, num != null ? h('span', { class: 'zp-num', text: String(num) }) : null, zone), h('p', { class: 'muted', text: info.blurb }))),
       h('div', { class: 'row-gap' },
-        h('button', { type: 'button', class: 'btn small ' + (editing ? 'primary' : 'ghost'), 'aria-pressed': String(editing), onclick: () => openZone(zone, { editing: !editing }) }, icon(editing ? 'check' : 'edit'), editing ? 'Done editing' : 'Edit touches'),
+        isAdmin() ? h('button', { type: 'button', class: 'btn small ' + (editing ? 'primary' : 'ghost'), 'aria-pressed': String(editing), onclick: () => openZone(zone, { editing: !editing }) }, icon(editing ? 'check' : 'edit'), editing ? 'Done editing' : 'Edit touches') : null,
         h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Close', onclick: () => closeModal() }, icon('close')))),
     !editing && here.rows ? h('div', { class: 'zone-run' },
       h('div', { class: 'sum-h', text: `Logged here in ${activeRun().name}` }),
@@ -196,7 +198,7 @@ export function openZone(zone, { editing = false } = {}) {
 }
 
 /* ---------- the card on the Guide tab ---------- */
-const view = { mode: 'numbers' };
+const view = { mode: 'numbers' };   // the logged-minutes view lives in Analysis now
 
 export function lineMapCard() {
   const card = h('section', { class: 'card linemap-card' });
@@ -227,11 +229,11 @@ export function lineMapCard() {
         h('div', { class: 'row-gap' },
           picker ? h('label', { class: 'run-pick' }, icon('line'), picker, icon('chevron', 'run-pick-chev')) : null,
           h('div', { class: 'seg small', role: 'group', 'aria-label': 'Badges show' },
-            [['numbers', 'Numbers'], ['guide', 'Touch types', 'pointer'], ['run', 'This run', 'pointer']].map(([k, label, ico]) => h('button', {
+            [['numbers', 'Numbers'], ['guide', 'Touch types', 'pointer']].map(([k, label, ico]) => h('button', {
               type: 'button', class: 'seg-btn' + (view.mode === k ? ' on' : ''), 'aria-pressed': String(view.mode === k),
               onclick: () => { view.mode = k; paint(); },
             }, ico ? h('span', { class: 'touch-ico' }, icon(ico)) : h('span', { class: 'num-ico', text: '#' }), label))),
-          h('a', { class: 'btn ghost small', href: '#diagram' }, icon('edit'), 'Edit diagram'))),
+          isAdmin() ? h('a', { class: 'btn ghost small', href: '#diagram' }, icon('edit'), 'Edit diagram') : null)),
       h('div', { class: 'linemap-scroll' }, host),
       h('p', { class: 'muted small lm-scroll-hint', text: 'Scroll sideways to see the whole line.' }),
       h('div', { class: 'lm-chips' },
@@ -296,3 +298,163 @@ function tint(hex, k) {
 }
 
 export const ZONE_KEYS = zonesOnDiagram(defaultDiagram());
+
+/* ---------- the process map in Analysis: where the touches and the minutes are ---------- */
+const PM = { metric: 'touches' };
+const METRICS = {
+  touches: { label: 'Touches', ico: 'pointer', fmt: (v) => fmt.int(v), unit: 'touches' },
+  minutes: { label: 'Time (minutes)', ico: 'clock', fmt: (v) => fmtMin(v), unit: 'min' },
+  rows: { label: 'Logged events', ico: 'list', fmt: (v) => fmt.int(v), unit: 'events' },
+};
+/** 0 is white; the most is Coca-Cola red. */
+const heatRed = (k) => { const l = (a, b) => Math.round(a + (b - a) * k); return `rgb(${l(255, 244)},${l(255, 0)},${l(255, 9)})`; };
+const zoneTally = (touches) => {
+  const by = new Map();
+  for (const t of touches) {
+    if (!t.zone) continue;
+    const v = by.get(t.zone) || { touches: 0, minutes: 0, rows: 0 };
+    v.touches += Number(t.count) || 0; v.minutes += totalMinutes(t); v.rows++;
+    by.set(t.zone, v);
+  }
+  return by;
+};
+
+/**
+ * touches: what the page shows, with every filter except zone, so every machine is on the map.
+ * planned / onPlanned: the page's planned filter, also set from here.
+ */
+export function processMapCard({ touches, planned = '', onPlanned, onFilterZone }) {
+  const card = h('section', { class: 'card pm-card' });
+  let board = null;
+  function paint() {
+    const by = zoneTally(touches);
+    const m = METRICS[PM.metric];
+    const val = (z) => by.get(z)?.[PM.metric] || 0;
+    const max = Math.max(0, ...[...by.values()].map(v => v[PM.metric]));
+    const total = [...by.values()].reduce((s, v) => s + v[PM.metric], 0);
+    const metricSel = h('select', { 'aria-label': 'Show on the map' }, Object.entries(METRICS).map(([k, x]) => h('option', { value: k, selected: k === PM.metric, text: x.label })));
+    metricSel.addEventListener('change', () => { PM.metric = metricSel.value; paint(); });
+    const plannedSel = h('select', { 'aria-label': 'Planned or unplanned', class: planned ? 'on' : '' },
+      [['', 'Planned + unplanned'], ['Planned', 'Planned only'], ['Unplanned', 'Unplanned only']].map(([v, t]) => h('option', { value: v, selected: v === planned, text: t })));
+    plannedSel.addEventListener('change', () => onPlanned?.(plannedSel.value));
+    const host = h('div', { class: 'linemap-host' });
+    clear(card,
+      h('div', { class: 'card-tools pm-head' },
+        h('div', {},
+          h('h2', { class: 'card-h' }, icon('map'), `The ${drawingName()} line`),
+          h('p', { class: 'muted small', text: `${m.label} at each machine${planned ? `, ${planned.toLowerCase()} only` : ''}: the redder, the more. Tap a machine for its numbers.` })),
+        h('div', { class: 'pm-ctl' },
+          h('label', { class: 'filter' }, h('span', { text: 'Show' }), metricSel),
+          h('label', { class: 'filter' }, h('span', { text: 'Planned / unplanned' }), plannedSel))),
+      h('div', { class: 'linemap-scroll' }, host),
+      h('div', { class: 'pm-legend' },
+        h('span', { class: 'muted small', text: '0' }),
+        h('span', { class: 'pm-ramp', 'aria-hidden': 'true' }),
+        h('span', { class: 'muted small', text: `${m.fmt(max)} ${m.unit}` }),
+        h('span', { class: 'grow' }),
+        h('span', { class: 'muted small', text: `${m.fmt(total)} ${m.unit} in all` })));
+    board?.destroy();
+    const badged = new Set();
+    board = createBoard(host, {
+      doc: diagramDoc(), mode: 'view', label: `${m.label} by machine on the ${drawingName()} line`,
+      onShapeClick: (sh) => openZoneInsights(sh.zone, { touches, onFilter: onFilterZone }),
+      zoneLabel: (sh) => `${sh.zone}: ${m.fmt(val(sh.zone))} ${m.unit}. Tap for details.`,
+      fillFor: (sh) => {
+        if (!sh.zone || sh.fill !== 'auto') return null;
+        const v = val(sh.zone);
+        if (sh.type === 'line') return v && max ? heatRed(v / max) : null;
+        return max ? heatRed(v / max) : '#FFFFFF';
+      },
+      decorate: (sh, g) => {
+        if (!sh.zone || sh.type === 'line' || badged.has(sh.zone)) return;
+        badged.add(sh.zone);
+        const v = val(sh.zone);
+        if (max && v / max > 0.55) g.classList.add('hot-dark');
+        if (!v) return;
+        const label = m.fmt(v);
+        const w = 32 + label.length * 8;
+        const b = bodyBox(sh);
+        const [bx, by2] = b.type === 'text' ? [b.x + b.w + 8 + w / 2, b.y + b.h / 2] : b.type === 'ellipse' ? [b.x + b.w * 0.9, b.y + b.h * 0.1] : [b.x + b.w - 4, b.y + 4];
+        const NS = 'http://www.w3.org/2000/svg';
+        const el = (tag, attrs) => { const e = document.createElementNS(NS, tag); for (const [k, x] of Object.entries(attrs)) e.setAttribute(k, x); return e; };
+        const badge = el('g', { class: 'lm-badge touch pm-badge' });
+        badge.append(el('rect', { x: bx - w / 2, y: by2 - 13, width: w, height: 26, rx: 13 }));
+        const t = el('text', { x: bx + 8, y: by2 + 5, class: 'lm-badge-t' }); t.textContent = label; badge.append(t);
+        badge.append(el('path', { d: iconPath(m.ico), transform: `translate(${bx - w / 2 + 6} ${by2 - 8}) scale(0.66)`, class: 'lm-badge-ico' }));
+        g.append(badge);
+      },
+    });
+    board.svg.classList.add('linemap');
+  }
+  paint();
+  return card;
+}
+
+/** What was logged at one machine: numbers, split, the biggest types, who; the guide behind a fold. */
+export function openZoneInsights(zone, { touches = [], onFilter } = {}) {
+  const here = touches.filter(t => t.zone === zone);
+  const sum = (list, f) => list.reduce((s, t) => s + f(t), 0);
+  const mins = (t) => totalMinutes(t), count = (t) => Number(t.count) || 0;
+  const allMin = sum(touches, mins);
+  const minHere = sum(here, mins), touchesHere = sum(here, count);
+  const pMin = sum(here.filter(t => t.planned === 'Planned'), mins), uMin = sum(here.filter(t => t.planned === 'Unplanned'), mins);
+  const phys = sum(here.filter(t => t.touchType === 'Physical'), mins), inf = sum(here.filter(t => t.touchType === 'Information'), mins);
+  const byType = new Map();
+  for (const t of here) {
+    if (!t.category) continue;
+    const k = `${t.category}\u0000${t.type || 'Type not set'}`;
+    const v = byType.get(k) || { code: t.category, type: t.type || 'Type not set', touches: 0, minutes: 0 };
+    v.touches += count(t); v.minutes += mins(t); byType.set(k, v);
+  }
+  const types = [...byType.values()].sort((a, b) => b.minutes - a.minutes).slice(0, 6);
+  const topMin = types[0]?.minutes || 0;
+  const who = new Map(); for (const t of here) if (t.who) who.set(t.who, (who.get(t.who) || 0) + mins(t));
+  const people = [...who.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
+  const num = zoneNumbers()[zone];
+  const guide = typesAt(zone);
+  const kpi = (ico, label, value, sub) => h('div', { class: 'zi-kpi' }, h('span', { class: 'zi-kpi-ico' }, icon(ico)), h('div', {}, h('strong', { text: value }), h('span', { class: 'muted small', text: label }), sub ? h('span', { class: 'muted small', text: sub }) : null));
+  const split = pMin + uMin;
+  openModal(h('div', { class: 'zone-pop zone-insights' },
+    h('div', { class: 'wiz-top' },
+      h('div', { class: 'zp-title' },
+        h('span', { class: 'zp-ico' }, icon(zoneIcon(zone))),
+        h('div', {}, h('h2', {}, num != null ? h('span', { class: 'zp-num', text: String(num) }) : null, zone),
+          h('p', { class: 'muted', text: here.length ? `Logged here, in what Analysis is showing` : 'Nothing logged here in what Analysis is showing.' }))),
+      h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Close', onclick: () => closeModal() }, icon('close'))),
+    here.length ? [
+      h('div', { class: 'zi-kpis' },
+        kpi('pointer', 'touches', fmt.int(touchesHere)),
+        kpi('clock', 'minutes', fmtMin(minHere), `${fmt.dec(minHere / 60, 1)} op-hours`),
+        kpi('list', 'logged events', fmt.int(here.length)),
+        kpi('chart', 'of all minutes', fmt.pct(allMin ? minHere / allMin : null))),
+      split ? h('div', { class: 'zi-split' },
+        h('div', { class: 'adm-split' }, h('span', { style: { width: `${(pMin / split) * 100}%`, background: 'var(--c-planned)' } }), h('span', { style: { width: `${(uMin / split) * 100}%`, background: 'var(--c-unplanned)' } })),
+        h('div', { class: 'zi-split-l' },
+          h('span', {}, icon('calendar-check'), ` Planned ${fmt.pct(pMin / split)} · ${fmtMin(pMin)} min`),
+          h('span', {}, icon('siren'), ` Unplanned ${fmt.pct(uMin / split)} · ${fmtMin(uMin)} min`),
+          phys + inf ? h('span', {}, icon('hand'), ` Physical ${fmt.pct(phys / (phys + inf))}`) : null)) : null,
+      types.length ? h('div', { class: 'zi-block' },
+        h('h3', { class: 'zone-h', text: 'Where the time goes here' }),
+        h('div', { class: 'zi-types' }, types.map(v => {
+          const c = CAT_BY_CODE[v.code];
+          return h('div', { class: 'zi-type' },
+            h('span', { class: 'code ' + (c?.planned === false ? 'code-u' : c ? 'code-p' : 'code-x'), text: v.code }),
+            h('span', { class: 'zi-type-name', text: v.type }),
+            h('span', { class: 'zi-bar' }, h('span', { style: { width: `${topMin ? (v.minutes / topMin) * 100 : 0}%`, background: c?.planned === false ? 'var(--c-unplanned)' : 'var(--c-planned)' } })),
+            h('span', { class: 'zi-val', text: `${fmtMin(v.minutes)} min · ${fmt.int(v.touches)}` }));
+        }))) : null,
+      people.length ? h('div', { class: 'zi-block' },
+        h('h3', { class: 'zone-h', text: 'Who' }),
+        h('div', { class: 'chips' }, people.map(([p, m2]) => h('span', { class: 'chip small with-ico' }, icon(personIcon(p)), `${p} · ${fmtMin(m2)} min`)))) : null,
+    ] : null,
+    h('details', { class: 'zt-shared zi-guide' },
+      h('summary', {}, h('span', { class: 'touch-ico' }, icon('pointer')), `Touches that happen here (${guide.length})`),
+      h('div', { class: 'zt-list' }, guide.map(([code, name]) => {
+        const c = CAT_BY_CODE[code]; const tinfo = typeInfo(code, name);
+        return c ? h('div', { class: 'zt zi-gt' }, h('span', { class: 'code ' + (c.planned ? 'code-p' : 'code-u'), text: code }), h('span', { class: 'zt-name', text: name }), h('span', { class: 'tt-tag' }, icon(touchTypeIcon(tinfo?.touchType)), tinfo?.touchType || '')) : null;
+      }))),
+    h('div', { class: 'row-gap zi-acts' },
+      onFilter && here.length ? h('button', { type: 'button', class: 'btn ghost', onclick: () => { closeModal(); onFilter(zone); } }, icon('filter'), 'Filter Analysis to this machine') : null,
+      h('button', { type: 'button', class: 'btn primary', onclick: () => prefill(zone) }, icon('timer'), 'Log a touch here'))),
+  { label: `${zone}: what was logged`, wide: true });
+}

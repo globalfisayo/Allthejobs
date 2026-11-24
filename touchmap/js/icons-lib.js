@@ -235,6 +235,15 @@ export const LUCIDE = {
   "panel-top-open":"M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2v-14a2 2 0 0 1 2 -2ZM3 9h18M15 14l-3 3-3-3",
   "cable-car":"M10 3h.01M14 2h.01M2 9l20-5M12 12V6.5M7 12h10a3 3 0 0 1 3 3v4a3 3 0 0 1 -3 3h-10a3 3 0 0 1 -3 -3v-4a3 3 0 0 1 3 -3ZM9 12v5M15 12v5M4 17h16",
   "tram-front":"M6 3h12a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2v-12a2 2 0 0 1 2 -2ZM4 11h16M12 3v8M8 19l-2 3M18 22l-2-3M8 15h.01M16 15h.01",
+  "presentation":"M2 3h20M21 3v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V3M7 21l5-5 5 5",
+  "list-tree":"M8 5h13M13 12h8M13 19h8M3 10a2 2 0 0 0 2 2h3M3 5v12a2 2 0 0 0 2 2h3",
+  "chevrons-up-down":"M7 15l5 5 5-5M7 9l5-5 5 5",
+  "chevrons-down-up":"M7 20l5-5 5 5M7 4l5 5 5-5",
+  "mouse-pointer-click":"M14 4.1 12 6M5.1 8l-2.9-.8M6 12l-1.9 2M7.2 2.2 8 5.1M9.037 9.69a.498.498 0 0 1 .653-.653l11 4.5a.5.5 0 0 1-.074.949l-4.349 1.041a1 1 0 0 0-.74.739l-1.04 4.35a.5.5 0 0 1-.95.074z",
+  "hourglass":"M5 22h14M5 2h14M17 22v-4.172a2 2 0 0 0-.586-1.414L12 12l-4.414 4.414A2 2 0 0 0 7 17.828V22M7 2v4.172a2 2 0 0 0 .586 1.414L12 12l4.414-4.414A2 2 0 0 0 17 6.172V2",
+  "chart-no-axes-combined":"M12 16v5M16 14.639V21M20 10.656V21M22 3l-8.646 8.646a.5.5 0 0 1-.708 0L9.354 8.354a.5.5 0 0 0-.707 0L2 15M4 18.463V21M8 14.656V21",
+  "lock-keyhole":"M11 16a1 1 0 1 0 2 0a1 1 0 1 0 -2 0M5 10h14a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2v-8a2 2 0 0 1 2 -2ZM7 10V7a5 5 0 0 1 10 0v3",
+  "user-lock":"M19 16v-2a2 2 0 0 0-4 0v2M9.5 15H7a4 4 0 0 0-4 4v2M6 7a4 4 0 1 0 8 0a4 4 0 1 0 -8 0M13.899 16h6.202a0.899 0.899 0 0 1 0.899 0.899v3.202a0.899 0.899 0 0 1 -0.899 0.899h-6.202a0.899 0.899 0 0 1 -0.899 -0.899v-3.202a0.899 0.899 0 0 1 0.899 -0.899Z",
 };
 
 /** Search words for the icon picker. */
@@ -468,4 +477,13 @@ export const LUCIDE_TAGS = {
   "panel-top-open":"position placement top topmost top edge upper edge upper above",
   "cable-car":"ski lift winter holiday alpine resort mountains",
   "tram-front":"railway metro subway underground track line tourism",
+  "presentation":"screen whiteboard marker pens markers blackboard chalk easel school",
+  "list-tree":"tree browser",
+  "chevrons-up-down":"direction movement vertical upward upwards north ascend page up",
+  "chevrons-down-up":"direction movement vertical downward downwards south descend page down",
+  "mouse-pointer-click":"click select",
+  "hourglass":"clock time hour minute second timestamp timer duration",
+  "chart-no-axes-combined":"diagram graph visualization data analytics analysis statistics presentation",
+  "lock-keyhole":"lock padlock private privacy protection password secure security",
+  "user-lock":"user people identity individual personal person account contact",
 };

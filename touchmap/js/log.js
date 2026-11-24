@@ -2,7 +2,7 @@
 // (or here), the run being logged into by default, or every run's history at once.
 import { CAT_BY_CODE } from './framework.js';
 import { finalise, missingFields, ordered, totalMinutes, perOccurrence, fmtMin, FIELD_LABEL, blankTouch, sortKey } from './model.js';
-import { state, save, activeRun, runsList, markTouch, removeTouch, restoreTouch, peopleFor } from './store.js';
+import { state, save, activeRun, runsList, markTouch, removeTouch, restoreTouch, peopleFor, canEditTouch } from './store.js';
 import { registerEditor } from './stopwatch.js';
 import { touchForm } from './form.js';
 import { swipeable } from './swipe.js';
@@ -103,7 +103,9 @@ export function renderLog(root, { onChange } = {}) {
     const per = perOccurrence(t);
     const total = totalMinutes(t);
     const refresh = () => { onChange?.(); renderLog(root, { onChange }); };
-    const row = h('button', { type: 'button', class: 'entry' + (t.incomplete ? ' incomplete' : ''), onclick: () => openEditor(t.id, refresh, r) },
+    // your own touches (or any, for an admin) open to edit; anyone else's open to read
+    const mine = canEditTouch(t);
+    const row = h('button', { type: 'button', class: 'entry' + (t.incomplete ? ' incomplete' : '') + (mine ? '' : ' theirs'), onclick: () => (mine ? openEditor(t.id, refresh, r) : openViewer(t, r, num)) },
       h('span', { class: 'entry-num' }, h('strong', { text: `#${num}` }), h('span', { text: fmt.time(t.start || t.createdAt) })),
       h('span', { class: 'entry-main' },
         h('span', { class: 'entry-title' },
@@ -118,10 +120,12 @@ export function renderLog(root, { onChange } = {}) {
           t.observer ? [icon('eye'), `by ${t.observer}`] : null,
         ].filter(Boolean).map(([ico, text]) => h('span', { class: 'em' }, ico, text))),
         t.description ? h('span', { class: 'entry-desc', text: t.description }) : null,
-        t.incomplete ? h('span', { class: 'badge warn', text: 'Needs: ' + missingFields(t).map(m => FIELD_LABEL[m]).join(', ') }) : null),
+        t.incomplete ? h('span', { class: 'badge warn', text: 'Needs: ' + missingFields(t).map(m => FIELD_LABEL[m]).join(', ') }) : null,
+        mine ? null : h('span', { class: 'badge lock' }, icon('lock'), t.observer ? `Logged by ${t.observer}` : 'Another device')),
       h('span', { class: 'entry-dur' },
         h('strong', { text: fmtMin(total) }), h('span', { text: ' min' }),
         h('small', { text: per == null ? `${t.count} counted` : `${t.count} × ${fmtMin(per)}` })));
+    if (!mine) return row;
     return swipeable(row, {
       onLeft: () => deleteWithUndo(r, t.id, num, refresh),
       onRight: () => openEditor(t.id, refresh, r),
@@ -140,8 +144,32 @@ export function deleteWithUndo(run, id, num, onDone) {
   onDone?.();
 }
 
+/** Someone else's touch: everything about it, nothing to change. */
+function openViewer(t, run, num) {
+  const cat = CAT_BY_CODE[t.category];
+  const per = perOccurrence(t);
+  const row = (ico, label, value) => (value ? h('div', { class: 'tv-row' }, icon(ico), h('span', { class: 'muted', text: label }), h('strong', { text: value })) : null);
+  openModal(h('div', { class: 'editor touch-view' },
+    h('div', { class: 'editor-top' },
+      h('div', {}, h('h2', {}, cat ? h('span', { class: 'code ' + (cat.planned ? 'code-p' : 'code-u'), text: cat.code }) : null, ' ', t.type || 'Type of touch not set'),
+        h('p', { class: 'muted', text: `#${num} in ${run.name} · ${fmt.day(t.start || t.createdAt)} ${fmt.time(t.start || t.createdAt)}` })),
+      h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Close', onclick: () => closeModal() }, icon('close'))),
+    h('div', { class: 'tv-list' },
+      row(zoneIcon(t.zone), 'Zone', t.zone),
+      row(personIcon(t.who), 'Person observed', t.who),
+      row('layers', 'Planned / unplanned', t.planned),
+      row(touchTypeIcon(t.touchType), 'Touch type', t.touchType),
+      row('hash', 'Count', String(t.count)),
+      row('timer', 'Minutes', `${fmtMin(totalMinutes(t))}${per != null ? ` (${t.count} × ${fmtMin(per)})` : ''}`),
+      row('eye', 'Observer', t.observer)),
+    t.description ? h('p', { class: 'tv-desc', text: t.description }) : null,
+    h('p', { class: 'lock-note' }, icon('lock'), ' Logged on another device. Only the person who logged it, or an admin, can change it.')),
+  { label: `Touch #${num}`, wide: true });
+}
+
 /** Edit one logged touch in a dialog, with the same form as capture. */
 export function openEditor(id, onDone, run = activeRun()) {
+  if (!canEditTouch(run.touches.find(t => t.id === id))) return;
   const idx = run.touches.findIndex(t => t.id === id);
   if (idx < 0) return;
   const original = run.touches[idx];

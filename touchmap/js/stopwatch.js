@@ -65,7 +65,7 @@ export const watch = {
       toast('Answer ' + missing.map(m => FIELD_LABEL[m]).join(', ') + ' to save.', { tone: 'bad' });
       return { ok: false, missing };
     }
-    const t = finalise(draft, { observer: state.observer, now: new Date(now) });
+    const t = finalise({ ...draft, device: state.deviceId }, { observer: state.observer, now: new Date(now) });
     run.touches.push(t);
     markTouch(run, t.id);
     state.lastSavedId = t.id;

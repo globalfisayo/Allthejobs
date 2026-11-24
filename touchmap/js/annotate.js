@@ -3,6 +3,7 @@
 // chart so they stay put on a phone or a projector.
 import { state, markSetup } from './store.js';
 import { createBoard } from './board.js';
+import { isAdmin } from './auth.js';
 import { h, clear, icon } from './ui.js';
 
 const POS = ['x', 'x1', 'x2'], POSY = ['y', 'y1', 'y2'];
@@ -106,7 +107,8 @@ export function annotationLayer(card, body, chartId) {
     }
   }
 
-  const button = h('button', { type: 'button', class: 'kind-btn annot-btn' + (saved().length ? ' has' : ''), title: 'Add notes, arrows, icons or images to this chart', 'aria-label': 'Annotate this chart', onclick: edit }, icon('edit'));
+  // notes are shared with the whole team, so only an admin writes them; everyone sees them
+  const button = isAdmin() ? h('button', { type: 'button', class: 'kind-btn annot-btn' + (saved().length ? ' has' : ''), title: 'Add notes, arrows, icons or images to this chart', 'aria-label': 'Annotate this chart', onclick: edit }, icon('edit')) : null;
   requestAnimationFrame(showView);
   const ro = new ResizeObserver(() => { if (editingId !== chartId) showView(); });
   ro.observe(body);

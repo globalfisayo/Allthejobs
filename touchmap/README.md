@@ -12,6 +12,18 @@ It works offline after the first visit, so patchy Wi-Fi on the line doesn't matt
 
 **Live (once GitHub Pages is on):** `https://globalfisayo.github.io/Allthejobs/touchmap/`
 
+## Who can change what
+
+- **Everyone:** logs touches, and edits or deletes the touches they logged themselves. Each
+  touch records the device it was logged on. Other people's touches show with a lock and
+  open read-only. Everyone sees all the analysis, the Guide and the runs.
+- **Admins** (the admin password) also:
+  - edit the Guide drawing (Edit diagram) and the touches at a zone (Edit touches);
+  - change the touch types, colours, zones and people in Setup;
+  - write notes on charts and set the team's chart types;
+  - delete runs that hold other people's touches;
+  - see All plants.
+
 ## Signing in and your profile
 
 - **One shared login for the organisation**, and a second password for admins (no personal
@@ -294,21 +306,33 @@ Setup → Touch types → edit a type.
 
 ## Analysis and presenting
 
-The Analysis tab rebuilds the template's Analysis sheet and goes further:
+The Analysis tab, from the top:
 
-- **Headline:** coverage against the reference frame, mapped vs capacity, and the
-  unexplained gap.
-- **Donuts** for an at-a-glance share: planned vs unplanned, physical vs information, and
-  where the minutes go (the top five categories, plus Other).
-- **Which lever applies:** a 2 × 2 of Planned/Unplanned × Physical/Information. Each
-  quadrant shows its minutes and lever (automate by design, digitalise, fix reliability).
-- **When in the shift:** minutes by start hour, stacked planned/unplanned.
-- **By category:** biggest first with the top three called out (the Pareto), or P1 → U7
-  order.
-- **By zone** and **by person**.
-- **Where × why:** a zone × category heatmap.
-- **Types of touch:** a table you can sort by total minutes, by frequency (automation
-  candidates), or by minutes per touch.
+- **Filters** for runs, days, observers, planned/unplanned, categories, zones, touch type
+  and person. **Present** (the presenter icon) goes full screen for a meeting room.
+- **Touches, mapped minutes and mapped op-hours.**
+- **The process map:** the line drawing, shaded from white (nothing) to Coca-Cola red (the
+  most).
+  - **Show:** touches, time in minutes, or logged events. **Planned / unplanned** filters
+    the whole page.
+  - Badges grow a little under the pointer.
+  - Tap a machine for its numbers: touches, minutes, events, its share of all minutes, the
+    planned/unplanned and physical split, the types taking the most time, and who. The
+    guide's touch list for that machine is folded underneath.
+  - From there, *Filter Analysis to this machine* or *Log a touch here*.
+- **Planned vs unplanned** and **Physical vs information.**
+- **By category:**
+  - It's a Pareto by default: biggest first, top three marked, with the cumulative share in
+    the table.
+  - Tap *Planned (P)* or *Unplanned (U)* in its legend to filter the page.
+  - **All types** opens the categories up into every type of touch (P1 Parts change, P1
+    Loading recipe and so on); **Categories** folds them back.
+- **Advanced charts** (the button at the end of the filters; on a phone, under Present):
+  - which lever applies;
+  - when in the shift;
+  - by zone and by person;
+  - where × why;
+  - runs compared, when several runs are selected.
 
 **Runs.** The **Runs** button at the top picks one run, several, or all. **Analyse
 together** on the Runs tab does the same. With more than one run, a *Runs compared* card
@@ -320,18 +344,17 @@ done on different days.
 | Chart | Options |
 |---|---|
 | Planned vs unplanned, Physical vs information | Donut, bars, columns, table |
-| Where the minutes go, By category, By zone | Bars, columns, **Pareto**, donut, table |
+| By category (and its types), By zone | **Pareto**, bars, columns, donut, table |
 | When in the shift | Stacked columns, lines, table |
 | Runs compared | Bars, columns, lines, table |
-| Types of touch | Sortable table, bars, Pareto |
 
-The chosen type is remembered for the team.
+An admin's choice is the team's default; anyone else's choice stays on their own device.
 
 **Pareto** is drawn as the Analysis sheet had it: bars biggest first, with the top three
 marked. Each bar's details give its rank and the cumulative share. A table underneath lists
 the cumulative share row by row. There is no cumulative line on a second axis.
 
-**Notes on charts.** The ✎ on a chart adds text, arrows, lines, shapes, icons, and images
+**Notes on charts** (admins). The ✎ on a chart adds text, arrows, lines, shapes, icons, and images
 you upload or paste, drawn over the chart. **Full screen** in the notes toolbar gives the
 chart the whole screen while you annotate. Notes are positioned relative to the chart, so
 they stay in place on a phone or a projector. They print with the page and are shared with

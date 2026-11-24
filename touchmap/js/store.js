@@ -3,6 +3,7 @@
 import { FRAMEWORK, DEFAULT_INFO, applyFramework } from './framework.js';
 import { applyColors } from './colors.js';
 import { blankTouch, uid } from './model.js';
+import { isAdmin } from './auth.js';
 
 const KEY = 'touchmap:v1';
 
@@ -69,6 +70,8 @@ state.annotations ??= {};    // chart id → annotation shapes
 state.chartKinds ??= {};     // chart id → chosen chart type
 state.library ??= [];        // the team's saved diagram shapes (groups), shared through Setup sync
 state.profile ??= null;      // this device's user: { name, bu, plant, line, at } from onboarding
+state.deviceId ??= uid();      // this device: its touches can be edited here (others only by an admin)
+state.chartKindsMine ??= {};   // a user's own chart-type choices, on this device only
 state.icons ??= { zones: {} };   // chosen icons: { zones: { name: icon } }, shared through Setup sync
 state.lineDrawings ??= [];   // the team's saved line drawings (besides K3), shared through Setup sync
 state.drawingId ??= null;    // which drawing this device shows; null = the one for my line, else K3
@@ -247,3 +250,15 @@ export const timer = {
 
 /* ---------- this device's user ---------- */
 export const profileName = () => state.profile?.name || state.observer || '';
+
+/**
+ * Who may change a logged touch: an admin, or the device that logged it (touches logged before
+ * devices were recorded: whoever has the same observer name).
+ */
+export function canEditTouch(t) {
+  if (!t) return false;
+  if (isAdmin()) return true;
+  if (t.device) return t.device === state.deviceId;
+  const me = profileName();
+  return !!me && t.observer === me;
+}
