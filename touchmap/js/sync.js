@@ -3,7 +3,7 @@
 // a sync sends the queue and brings back what the other devices changed since last time.
 import { DEFAULT_INFO, applyFramework } from './framework.js';
 import { applyColors } from './colors.js';
-import { state, save, hooks, markEverything, pendingCount, ensureRun } from './store.js';
+import { state, save, hooks, markEverything, pendingCount, ensureRun, isPassiveCopy } from './store.js';
 import { syncCells, runCells, cleanTouch, cleanInfo } from './export.js';
 
 const APPS_SCRIPT = /^https:\/\/script\.google\.com\/(a\/[A-Za-z0-9.-]+\/)?macros\/s\/[A-Za-z0-9_-]+\/exec$/;
@@ -187,7 +187,7 @@ export function applyRemote(data, { firstSync = false } = {}) {
 /** Send queued changes and fetch the team's. Resolves true on success. */
 export function syncNow() {
   const s = state.sync;
-  if (!s.url) return Promise.resolve(false);
+  if (!s.url || isPassiveCopy()) return Promise.resolve(false);
   if (inflight) { again = true; return inflight; }
   busy = true;
   emit(false);
@@ -238,13 +238,13 @@ export function syncNow() {
   return inflight;
 }
 
-/** Wire sync into the app: on change, on reconnect, on return to the app, and every 30 s. */
+/** Wire sync into the app: on change, on reconnect, on return to the app, and every 15 s. */
 export function startSync() {
   hooks.dirty = () => requestSync();
   window.addEventListener('online', () => { if (state.sync.error === 'offline') state.sync.error = null; syncNow(); });
   window.addEventListener('offline', () => emit(false));
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') syncNow(); });
-  setInterval(() => { if (document.visibilityState === 'visible') syncNow(); }, 30000);
+  setInterval(() => { if (document.visibilityState === 'visible') syncNow(); }, 15000);
   if (state.sync.url) syncNow();
 }
 

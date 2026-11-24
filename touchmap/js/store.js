@@ -85,7 +85,12 @@ export function markSetup() {
 }
 
 let storageOk = true;
+let passive = false;
+/** Another copy of the app is in use on this device: stop writing, so neither overwrites the other. */
+export function setPassive(on) { passive = !!on; }
+export const isPassiveCopy = () => passive;
 export function save() {
+  if (passive) return storageOk;
   try {
     localStorage.setItem(KEY, JSON.stringify(state));
     storageOk = true;

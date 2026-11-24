@@ -173,6 +173,16 @@ whole observation team". The sheet doubles as a live Observation Log.
 - **Workspace accounts.** If your Google account is a work (Google Workspace) account,
   your admin may not allow "Anyone" access. A personal Google account always can.
 
+**One copy at a time on each device.** If the app is open twice on one device (two browser
+tabs, or the installed app and a tab), the copy you opened last is the one that logs and
+syncs. The other shows *Touch Map is open in another tab* with **Use it here**. Two copies
+writing to the same storage would otherwise overwrite each other's touches.
+
+**How fast touches arrive.** While the app is open, it syncs straight after you save a touch,
+every 15 seconds, and whenever you come back to it. A touch logged on one device normally
+shows on the others within about 15 to 20 seconds. The sync pill shows *n waiting* while
+anything is still to be sent.
+
 ## Observation time
 
 Each run's observed time is worked out from the touches: **first to last touch on each
