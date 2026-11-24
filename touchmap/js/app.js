@@ -17,6 +17,7 @@ import { startSync, onSync } from './sync.js';
 import { paintSyncPill, handleJoin } from './sync-ui.js';
 import { onWatch } from './stopwatch.js';
 import { initMinibar, showMinibar } from './minibar.js';
+import { paintAvatar } from './usermenu.js';
 
 // Each view renders into the main element; one that keeps timers or listeners returns a cleanup.
 const ROUTES = {
@@ -71,6 +72,7 @@ function paintChrome() {
   const r = current();
   const tab = TAB_OF[r] || r;
   document.getElementById('admin-link').hidden = !isAdmin();
+  paintAvatar();
   for (const a of document.querySelectorAll('[data-route]')) {
     const on = a.dataset.route === tab;
     a.classList.toggle('on', on);

@@ -3,11 +3,14 @@
 // The drawing is a schematic of the line's flow, not an engineering layout.
 import { CAT_BY_CODE, CATEGORIES, typeInfo } from './framework.js';
 import { totalMinutes, setCategory, setType, fmtMin } from './model.js';
-import { state, save, activeRun } from './store.js';
-import { h, clear, icon, toast, openModal, closeModal, fmt } from './ui.js';
+import { state, save, activeRun, runsList, markTouch, markSetup } from './store.js';
+import { h, clear, icon, toast, openModal, closeModal, confirmBox, fmt } from './ui.js';
 import { createBoard, bodyBox } from './board.js';
-import { diagramDoc, defaultDiagram, zonesOnDiagram } from './diagram.js';
+import { diagramDoc, defaultDiagram, zonesOnDiagram, zoneNumbers, drawingName, drawingOptions, currentDrawingId, useDrawing } from './diagram.js';
 import { zoneColour } from './colors.js';
+import { zoneIcon, categoryIcon, touchTypeIcon } from './iconmap.js';
+import { editFramework, usage, typeEditor } from './setup.js';
+import { applyFramework } from './framework.js';
 
 import { ZONE_INFO, ON_EVERY_MACHINE } from './zonemap.js';
 export { ZONE_INFO, ON_EVERY_MACHINE };
@@ -55,21 +58,105 @@ function everywhere() {
   return CATEGORIES.flatMap(c => c.types.filter(t => !t.hidden && t.everywhere).map(t => [c.code, t.name]));
 }
 
+/* ---------- changing the touches at a zone, from the popup ---------- */
+const allZones = () => [...new Set([...state.lists.zones, ...zonesOnDiagram()])];
+/** Undo for a framework change: put the previous framework back. */
+function withUndo(label, zone, change) {
+  const before = JSON.stringify(state.framework);
+  change();
+  toast(label, { action: { label: 'Undo', fn: () => { state.framework = JSON.parse(before); applyFramework(state.framework); markSetup(); openZone(zone, { editing: true }); } }, timeout: 7000 });
+  openZone(zone, { editing: true });
+}
+const findType = (cats, code, name) => cats.find(c => c.code === code)?.types.find(t => t.name === name);
+function moveType(code, name, from, to) {
+  withUndo(`Moved “${name}” to ${to}.`, from, () => editFramework(cats => {
+    const t = findType(cats, code, name);
+    t.zones = [...new Set([...(t.zones || []).filter(z => z !== from), to])];
+  }));
+}
+function unplace(code, name, zone) {
+  withUndo(`“${name}” is no longer listed at ${zone}. It stays on Capture under ${code}.`, zone, () => editFramework(cats => {
+    const t = findType(cats, code, name);
+    t.zones = (t.zones || []).filter(z => z !== zone);
+  }));
+}
+async function hideOrDelete(code, name, zone) {
+  const used = usage(code, name);
+  const ok = await confirmBox(used
+    ? { title: `Hide “${name}”?`, body: `${used} logged ${used === 1 ? 'touch uses' : 'touches use'} it, so it is hidden from Capture rather than deleted. Show it again in Setup.`, ok: 'Hide it' }
+    : { title: `Delete “${name}”?`, body: 'Nothing has been logged with it. It is removed from Capture and the Guide for the whole team.', ok: 'Delete', danger: true });
+  if (!ok) { openZone(zone, { editing: true }); return; }
+  withUndo(used ? `“${name}” hidden.` : `“${name}” deleted.`, zone, () => editFramework(cats => {
+    const c = cats.find(x => x.code === code);
+    if (used) findType(cats, code, name).hidden = true;
+    else c.types = c.types.filter(t => t.name !== name);
+  }));
+}
+/** Move a type to another category (and so to planned or unplanned); its logged touches follow. */
+async function reclassify(code, name, to, zone) {
+  if (!to || to === code) return;
+  const target = CAT_BY_CODE[to];
+  const used = usage(code, name);
+  const flips = target.planned !== CAT_BY_CODE[code]?.planned;
+  const ok = await confirmBox({
+    title: `Move “${name}” to ${to}?`,
+    body: `${target.name}${flips ? `: it becomes ${target.planned ? 'planned' : 'unplanned'}` : ''}. ${used ? `The ${used} logged ${used === 1 ? 'touch moves' : 'touches move'} with it.` : 'Nothing has been logged with it yet.'}`,
+    ok: 'Move it',
+  });
+  if (!ok) { openZone(zone, { editing: true }); return; }
+  const clash = target.types.some(t => t.name === name);
+  const newName = clash ? `${name} (from ${code})` : name;
+  editFramework(cats => {
+    const from = cats.find(c => c.code === code), dest = cats.find(c => c.code === to);
+    const i = from.types.findIndex(t => t.name === name);
+    const [t] = from.types.splice(i, 1);
+    dest.types.push({ ...t, name: newName });
+  });
+  const now = new Date().toISOString();
+  for (const r of runsList()) for (const t of r.touches) {
+    if (t.category === code && t.type === name) { t.category = to; t.type = newName; t.planned = target.planned ? 'Planned' : 'Unplanned'; t.updatedAt = now; markTouch(r, t.id); }
+  }
+  save();
+  toast(`“${newName}” is now ${to}${used ? `, with its ${used} logged ${used === 1 ? 'touch' : 'touches'}` : ''}.`);
+  openZone(zone, { editing: true });
+}
+
 /* ---------- popup ---------- */
-export function openZone(zone) {
+export function openZone(zone, { editing = false } = {}) {
   const info = { ...(ZONE_INFO[zone] || { machine: true, blurb: 'An area added in Setup.' }), types: typesAt(zone) };
   const here = loggedAt(zone);
+  const num = zoneNumbers()[zone];
+  const reopen = () => openZone(zone, { editing: true });
   const item = ([code, name]) => {
     const c = CAT_BY_CODE[code];
     if (!c) return null;
     const tinfo = typeInfo(code, name);
+    if (editing) {
+      const moveSel = h('select', { class: 'zt-sel', 'aria-label': `Move ${name} to another zone` },
+        h('option', { value: '', text: 'Move to…' }), allZones().filter(z => z !== zone).map(z => h('option', { value: z, text: z })));
+      moveSel.addEventListener('change', () => { if (moveSel.value) moveType(code, name, zone, moveSel.value); });
+      const catSel = h('select', { class: 'zt-sel', 'aria-label': `Reclassify ${name}` },
+        h('option', { value: '', text: 'Reclassify…' }),
+        [true, false].map(p => h('optgroup', { label: p ? 'Planned' : 'Unplanned' }, CATEGORIES.filter(x => x.planned === p && x.code !== code).map(x => h('option', { value: x.code, text: `${x.code} ${x.short}` })))));
+      catSel.addEventListener('change', () => reclassify(code, name, catSel.value, zone));
+      return h('div', { class: 'zt zt-edit' },
+        h('div', { class: 'zt-edit-h' },
+          h('span', { class: 'code ' + (c.planned ? 'code-p' : 'code-u'), text: code }),
+          h('span', { class: 'zt-name', text: name }),
+          h('span', { class: 'tt-tag' }, icon(touchTypeIcon(tinfo?.touchType)), tinfo?.touchType || '')),
+        h('div', { class: 'zt-edit-acts' },
+          moveSel, catSel,
+          h('button', { type: 'button', class: 'icon-btn small', title: 'Edit name, how to count and zones', 'aria-label': `Edit ${name}`, onclick: () => typeEditor(code, typeInfo(code, name), reopen) }, icon('edit')),
+          h('button', { type: 'button', class: 'icon-btn small', title: `Take it off ${zone}`, 'aria-label': `Remove ${name} from ${zone}`, onclick: () => unplace(code, name, zone) }, icon('close')),
+          h('button', { type: 'button', class: 'icon-btn small danger', title: 'Hide or delete it', 'aria-label': `Hide or delete ${name}`, onclick: () => hideOrDelete(code, name, zone) }, icon('trash'))));
+    }
     return h('details', { class: 'zt' },
       h('summary', {},
         h('span', { class: 'code ' + (c.planned ? 'code-p' : 'code-u'), text: code }),
         h('span', { class: 'zt-name', text: name }),
-        h('span', { class: 'tt-tag', text: tinfo?.touchType || '' })),
+        h('span', { class: 'tt-tag' }, icon(touchTypeIcon(tinfo?.touchType)), tinfo?.touchType || '')),
       h('div', { class: 'zt-body' },
-        h('p', { class: 'zt-cat', text: c.name }),
+        h('p', { class: 'zt-cat' }, icon(categoryIcon(code)), ' ', c.name),
         h('p', {}, h('strong', { text: 'How to count: ' }), tinfo?.guide || ''),
         h('button', { type: 'button', class: 'btn primary small', onclick: () => prefill(zone, code, name) }, icon('timer'), 'Log this touch')));
   };
@@ -78,30 +165,38 @@ export function openZone(zone) {
     for (const p of pairs) { if (!byCat.has(p[0])) byCat.set(p[0], []); byCat.get(p[0]).push(p); }
     return [...byCat.keys()].sort().flatMap(k => byCat.get(k)).map(item);
   };
+  const addSel = h('select', { class: 'zt-sel', 'aria-label': 'Category for the new touch type' },
+    h('option', { value: '', text: 'In category…' }),
+    [true, false].map(p => h('optgroup', { label: p ? 'Planned' : 'Unplanned' }, CATEGORIES.filter(x => x.planned === p).map(x => h('option', { value: x.code, text: `${x.code} ${x.short}` })))));
+  addSel.addEventListener('change', () => { if (addSel.value) typeEditor(addSel.value, null, reopen, { zones: [zone] }); });
 
-  openModal(h('div', { class: 'zone-pop' },
+  openModal(h('div', { class: 'zone-pop' + (editing ? ' editing' : '') },
     h('div', { class: 'wiz-top' },
-      h('div', {}, h('h2', { text: zone }), h('p', { class: 'muted', text: info.blurb })),
-      h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Close', onclick: () => closeModal() }, icon('close'))),
-    here.rows ? h('div', { class: 'zone-run' },
+      h('div', { class: 'zp-title' },
+        h('span', { class: 'zp-ico' }, icon(zoneIcon(zone))),
+        h('div', {}, h('h2', {}, num != null ? h('span', { class: 'zp-num', text: String(num) }) : null, zone), h('p', { class: 'muted', text: info.blurb }))),
+      h('div', { class: 'row-gap' },
+        h('button', { type: 'button', class: 'btn small ' + (editing ? 'primary' : 'ghost'), 'aria-pressed': String(editing), onclick: () => openZone(zone, { editing: !editing }) }, icon(editing ? 'check' : 'edit'), editing ? 'Done editing' : 'Edit touches'),
+        h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Close', onclick: () => closeModal() }, icon('close')))),
+    !editing && here.rows ? h('div', { class: 'zone-run' },
       h('div', { class: 'sum-h', text: `Logged here in ${activeRun().name}` }),
       h('p', {}, h('strong', { text: `${fmt.int(here.touches)} touches · ${fmtMin(here.minutes)} min` }), ` across ${here.rows} ${here.rows === 1 ? 'row' : 'rows'}`),
       h('ul', { class: 'zone-run-list' }, here.types.slice(0, 5).map(v => h('li', {},
         h('span', { class: 'code ' + (CAT_BY_CODE[v.code]?.planned === false ? 'code-u' : CAT_BY_CODE[v.code] ? 'code-p' : 'code-x'), text: v.code || '?' }),
         h('span', { text: v.type }), h('span', { class: 'muted', text: ` ${fmt.int(v.touches)} · ${fmtMin(v.minutes)} min` }))))) : null,
-    h('div', { class: 'row-gap' },
-      h('button', { type: 'button', class: 'btn primary', onclick: () => prefill(zone) }, icon('timer'), 'Log a touch here')),
+    editing ? h('div', { class: 'zt-add' }, icon('plus'), h('strong', { text: 'Add a touch type here' }), addSel)
+      : h('div', { class: 'row-gap' }, h('button', { type: 'button', class: 'btn primary', onclick: () => prefill(zone) }, icon('timer'), 'Log a touch here')),
     h('h3', { class: 'zone-h', text: `Touches that happen here (${info.types.length})` }),
-    h('p', { class: 'muted small', text: 'Tap one for how to count it, or to start logging it.' }),
+    h('p', { class: 'muted small', text: editing ? 'Move one to another zone, reclassify it (planned ⇄ unplanned moves its logged touches too), take it off this zone, or hide it. Changes are shared with your team.' : 'Tap one for how to count it, or to start logging it.' }),
     h('div', { class: 'zt-list' }, group(info.types)),
-    info.machine ? h('details', { class: 'zt-shared' },
+    info.machine && !editing ? h('details', { class: 'zt-shared' },
       h('summary', {}, `Plus on every machine (${everywhere().length}): safety, maintenance, breakdowns, defects`),
       h('div', { class: 'zt-list' }, group(everywhere()))) : null),
   { label: zone, wide: true });
 }
 
 /* ---------- the card on the Guide tab ---------- */
-const view = { mode: 'guide' };
+const view = { mode: 'numbers' };
 
 export function lineMapCard() {
   const card = h('section', { class: 'card linemap-card' });
@@ -118,16 +213,21 @@ export function lineMapCard() {
     const badged = new Set();
     const host = h('div', { class: 'linemap-host' });
 
+    const opts = drawingOptions();
+    const picker = opts.length > 1 ? h('select', { class: 'run-pick-sel', 'aria-label': 'Which line' }, opts.map(o => h('option', { value: o.id, selected: o.id === currentDrawingId(), text: o.name }))) : null;
+    picker?.addEventListener('change', () => { useDrawing(picker.value); paint(); });
     clear(card,
       h('div', { class: 'card-tools' },
         h('div', {},
-          h('h2', { class: 'card-h' }, icon('map'), 'The K3 line: tap a zone'),
+          h('h2', { class: 'card-h' }, icon('map'), `The ${drawingName()} line: tap a zone`),
           h('p', { class: 'muted small', text: heat
             ? `Shaded by minutes logged in ${run.name}; badges show touches.`
-            : 'Badges count the touch types at each zone. Tap one for how to count each, and to start logging.' })),
+            : view.mode === 'numbers' ? 'Badges number the equipment along the line. Tap a zone for its touches; Edit touches there to change them.'
+              : 'Badges count the touch types at each zone. Tap one for how to count each, and to start logging.' })),
         h('div', { class: 'row-gap' },
-          h('div', { class: 'seg small', role: 'group', 'aria-label': 'Map shows' },
-            [['guide', 'What to log where'], ['run', 'This run']].map(([k, label]) => h('button', {
+          picker ? h('label', { class: 'run-pick' }, icon('line'), picker, icon('chevron', 'run-pick-chev')) : null,
+          h('div', { class: 'seg small', role: 'group', 'aria-label': 'Badges show' },
+            [['numbers', 'Numbers'], ['guide', 'Touch types'], ['run', 'This run']].map(([k, label]) => h('button', {
               type: 'button', class: 'seg-btn' + (view.mode === k ? ' on' : ''), 'aria-pressed': String(view.mode === k),
               onclick: () => { view.mode = k; paint(); },
             }, label))),
@@ -155,8 +255,9 @@ export function lineMapCard() {
       },
       decorate: (sh, g) => {
         if (!sh.zone || sh.type === 'line' || badged.has(sh.zone)) return;
+        const n = heat ? (counts[sh.zone]?.touches || 0) : view.mode === 'numbers' ? sh.num : typesAt(sh.zone).length;
+        if (n == null) return;
         badged.add(sh.zone);
-        const n = heat ? (counts[sh.zone]?.touches || 0) : typesAt(sh.zone).length;
         if (heat && !n) return;
         const label = heat ? fmt.int(n) : String(n);
         const w = Math.max(26, 10 + label.length * 8);

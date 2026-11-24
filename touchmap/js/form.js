@@ -2,6 +2,7 @@
 import { CATEGORIES, CAT_BY_CODE, CATEGORY_RULE, DECISION, OTHER_ADVICE, TOUCH_TYPES, typesFor, typeInfo } from './framework.js';
 import { perOccurrence, totalMinutes, setPlanned, setCategory, setType, fmtMin, minSec, round, fmtClock } from './model.js';
 import { h, clear, icon, openModal, closeModal } from './ui.js';
+import { zoneIcon, personIcon, categoryIcon, plannedIcon, touchTypeIcon } from './iconmap.js';
 
 const parseNum = (s) => {
   if (s == null) return null;
@@ -20,12 +21,13 @@ const parseNum = (s) => {
 export function touchForm(model, opts) {
   const { lists, onChange = () => {} } = opts;
   const sections = {};
-  const changed = (...names) => { names.forEach(n => sections[n]?.render()); clearMissing(); onChange(); };
+  const changed = (...names) => { names.forEach(n => sections[n]?.render()); clearMissing(); progress(); onChange(); };
 
   function section(key, title, { optional = false, hint = '', extra = null } = {}) {
     const body = h('div', { class: 'q-body' });
     const el = h('fieldset', { class: 'q', 'data-q': key },
       h('legend', { class: 'q-head' },
+        h('span', { class: 'q-state', 'aria-hidden': 'true' }, icon('check')),
         h('span', { class: 'q-title', text: title }),
         optional ? h('span', { class: 'q-opt', text: 'optional' }) : null,
         extra),
@@ -34,12 +36,13 @@ export function touchForm(model, opts) {
     return { el, body };
   }
 
-  function chips(list, current, pick, { allowClear = false, cls = '' } = {}) {
-    return h('div', { class: 'chips ' + cls, role: 'group' },
+  // a picked option stays solid; the others fade back
+  function chips(list, current, pick, { allowClear = false, cls = '', iconFor = null } = {}) {
+    return h('div', { class: 'chips ' + cls + (current ? ' has-pick' : ''), role: 'group' },
       list.map(v => h('button', {
-        type: 'button', class: 'chip' + (v === current ? ' on' : ''), 'aria-pressed': String(v === current),
+        type: 'button', class: 'chip' + (iconFor ? ' with-ico' : '') + (v === current ? ' on' : ''), 'aria-pressed': String(v === current),
         onclick: () => pick(allowClear && v === current ? '' : v),
-      }, v)));
+      }, iconFor ? icon(iconFor(v)) : null, v)));
   }
 
   /* zone */
@@ -48,7 +51,7 @@ export function touchForm(model, opts) {
     s.render = () => {
       const list = [...lists.zones];
       if (model.zone && !list.includes(model.zone)) list.push(model.zone);
-      clear(s.body, chips(list, model.zone, v => { model.zone = v; changed('zone'); }));
+      clear(s.body, chips(list, model.zone, v => { model.zone = v; changed('zone'); }, { iconFor: zoneIcon }));
     };
     sections.zone = s;
   }
@@ -59,7 +62,7 @@ export function touchForm(model, opts) {
     s.render = () => {
       const list = [...(opts.people || lists.people)];
       if (model.who && !list.includes(model.who)) list.push(model.who);
-      clear(s.body, chips(list, model.who, v => { model.who = v; changed('who'); }, { allowClear: true, cls: 'small' }));
+      clear(s.body, chips(list, model.who, v => { model.who = v; changed('who'); }, { allowClear: true, cls: 'small', iconFor: personIcon }));
     };
     sections.who = s;
   }
@@ -69,11 +72,11 @@ export function touchForm(model, opts) {
     const helpBtn = h('button', { type: 'button', class: 'link-btn', onclick: () => openWizard(model, () => changed('planned', 'category', 'type', 'touchType', 'description')) },
       icon('help'), 'Help me choose');
     const s = section('planned', 'Planned / Unplanned', { hint: DECISION.nodes.q1.text + ' Yes = Unplanned.', extra: helpBtn });
-    s.render = () => clear(s.body, h('div', { class: 'seg big' },
+    s.render = () => clear(s.body, h('div', { class: 'seg big' + (model.planned ? ' has-pick' : '') },
       ['Planned', 'Unplanned'].map(v => h('button', {
         type: 'button', class: 'seg-btn ' + (v === 'Planned' ? 'p' : 'u') + (model.planned === v ? ' on' : ''), 'aria-pressed': String(model.planned === v),
         onclick: () => { setPlanned(model, v); changed('planned', 'category', 'type', 'touchType'); },
-      }, h('span', { class: 'seg-main', text: v }), h('span', { class: 'seg-sub', text: v === 'Planned' ? 'P1 to P8 · on the plan for the shift' : 'U1 to U7 · somebody would call it a problem' })))));
+      }, h('span', { class: 'seg-main' }, icon(plannedIcon(v)), v), h('span', { class: 'seg-sub', text: v === 'Planned' ? 'P1 to P8 · on the plan for the shift' : 'U1 to U7 · somebody would call it a problem' })))));
     sections.planned = s;
   }
 
@@ -86,10 +89,10 @@ export function touchForm(model, opts) {
       clear(s.body,
         groups.map(isP => h('div', { class: 'cat-group' },
           groups.length > 1 ? h('div', { class: 'cat-group-h', text: isP ? 'Planned' : 'Unplanned' }) : null,
-          h('div', { class: 'cats' }, CATEGORIES.filter(c => c.planned === isP && (!c.hidden || c.code === model.category)).map(c => h('button', {
+          h('div', { class: 'cats' + (model.category ? ' has-pick' : '') }, CATEGORIES.filter(c => c.planned === isP && (!c.hidden || c.code === model.category)).map(c => h('button', {
             type: 'button', class: 'cat' + (c.code === model.category ? ' on' : ''), 'aria-pressed': String(c.code === model.category),
             onclick: () => { setCategory(model, c.code); changed('planned', 'category', 'type', 'touchType'); },
-          }, h('span', { class: 'code ' + (c.planned ? 'code-p' : 'code-u'), text: c.code }), h('span', { class: 'cat-name', text: c.short })))))),
+          }, h('span', { class: 'code ' + (c.planned ? 'code-p' : 'code-u'), text: c.code }), h('span', { class: 'cat-ico' }, icon(categoryIcon(c.code))), h('span', { class: 'cat-name', text: c.short })))))),
         cat ? h('p', { class: 'rule' }, h('strong', { text: cat.code + ' when: ' }), CATEGORY_RULE[cat.code] || cat.rule || 'Added in Setup.') : null);
     };
     sections.category = s;
@@ -103,10 +106,10 @@ export function touchForm(model, opts) {
       if (!types.length) { clear(s.body, h('p', { class: 'empty', text: 'Pick a category first.' })); return; }
       const info = typeInfo(model.category, model.type);
       clear(s.body,
-        h('div', { class: 'types' }, types.map(t => h('button', {
+        h('div', { class: 'types' + (model.type ? ' has-pick' : '') }, types.map(t => h('button', {
           type: 'button', class: 'type' + (t.name === model.type ? ' on' : ''), 'aria-pressed': String(t.name === model.type),
           onclick: () => { setType(model, t.name); changed('type', 'touchType'); },
-        }, h('span', { class: 'type-name', text: t.name }), h('span', { class: 'tt-tag', text: t.touchType })))),
+        }, h('span', { class: 'type-name', text: t.name }), h('span', { class: 'tt-tag' }, icon(touchTypeIcon(t.touchType)), t.touchType)))),
         info ? h('div', { class: 'guide' }, h('div', { class: 'guide-h' }, icon('info'), 'How to count'), h('p', { text: info.guide })) : null);
     };
     sections.type = s;
@@ -118,10 +121,10 @@ export function touchForm(model, opts) {
     s.render = () => {
       const guide = typeInfo(model.category, model.type)?.touchType;
       clear(s.body,
-        h('div', { class: 'seg' }, TOUCH_TYPES.map(v => h('button', {
+        h('div', { class: 'seg' + (model.touchType ? ' has-pick' : '') }, TOUCH_TYPES.map(v => h('button', {
           type: 'button', class: 'seg-btn' + (model.touchType === v ? ' on' : ''), 'aria-pressed': String(model.touchType === v),
           onclick: () => { model.touchType = v; changed('touchType'); },
-        }, h('span', { class: 'seg-main', text: v }), h('span', { class: 'seg-sub', text: v === 'Physical' ? 'hands on equipment, material or product' : 'reading, writing, keying, communicating' }),
+        }, h('span', { class: 'seg-main' }, icon(touchTypeIcon(v)), v), h('span', { class: 'seg-sub', text: v === 'Physical' ? 'hands on equipment, material or product' : 'reading, writing, keying, communicating' }),
           guide === v ? h('span', { class: 'seg-flag', text: 'guide' }) : null))),
         guide && model.touchType && guide !== model.touchType
           ? h('p', { class: 'warn-line' }, icon('warn'), `The guide lists this type as ${guide}. Keep ${model.touchType} only if that is what you saw.`) : null);
@@ -232,9 +235,25 @@ export function touchForm(model, opts) {
     first?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
 
-  function refreshAll() { Object.values(sections).forEach(s => s.render()); }
+  function refreshAll() { Object.values(sections).forEach(s => s.render()); progress(); }
 
   const order = ['zone', 'who', 'planned', 'category', 'type', 'touchType', 'count', 'description'];
+  // The question being answered is solid, answered ones keep their colour, the ones still to
+  // come are greyed (and still work if tapped).
+  const REQUIRED = ['zone', 'planned', 'category', 'type', 'touchType'];
+  const filled = (k) => (k === 'count' ? Number(model.count) >= 1 : k === 'description' ? !!(model.description || '').trim() : !!model[k]);
+  function progress() {
+    const active = REQUIRED.find(k => !filled(k)) || null;
+    const at = active ? order.indexOf(active) : order.length;
+    order.forEach((k, i) => {
+      const el = sections[k].el;
+      const isActive = k === active;
+      const later = !isActive && i > at;
+      el.classList.toggle('is-active', isActive);
+      el.classList.toggle('is-later', later);
+      el.classList.toggle('is-done', !isActive && !later && filled(k) && k !== 'count');
+    });
+  }
   const el = h('div', { class: 'touch-form' }, order.map(k => sections[k].el));
   refreshAll();
   return { el, sync, refreshAll, markMissing, sections };

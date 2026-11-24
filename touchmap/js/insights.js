@@ -9,6 +9,7 @@ import { h, clear, icon, fmt, infoNote, openModal, closeModal, fmtDuration } fro
 import { hbars, columns, catColumns, pareto as paretoChart, donut as donutChart, lines as linesChart, table as itemsTable, kindSwitch } from './charts.js';
 import { annotationLayer } from './annotate.js';
 import { zoneColour } from './colors.js';
+import { zoneIcon, personIcon, categoryIcon, plannedIcon, touchTypeIcon } from './iconmap.js';
 import { markSetup } from './store.js';
 
 const SVGNS = 'http://www.w3.org/2000/svg';
@@ -243,8 +244,9 @@ const inkOn = (t) => (t > 0.55 ? '#fff' : 'var(--ink)');
 const catLabel = (i, rich) => {
   const c = CAT_BY_CODE[i.key];
   if (!c) return rich ? h('span', { class: 'bl' }, h('span', { class: 'code code-x', text: '?' }), h('span', { text: 'Not categorised' })) : 'Not categorised';
-  return rich ? h('span', { class: 'bl' }, h('span', { class: 'code ' + (c.planned ? 'code-p' : 'code-u'), text: c.code }), h('span', { text: c.short })) : c.name;
+  return rich ? h('span', { class: 'bl' }, h('span', { class: 'code ' + (c.planned ? 'code-p' : 'code-u'), text: c.code }), icon(categoryIcon(c.code), 'lbl-ico'), h('span', { text: c.short })) : c.name;
 };
+const withIcon = (ico, text) => h('span', { class: 'bl' }, icon(ico, 'lbl-ico'), h('span', { text }));
 const catColour = (i) => (CAT_BY_CODE[i.key] ? (CAT_BY_CODE[i.key].planned ? COLOUR.Planned : COLOUR.Unplanned) : COLOUR.none);
 
 
@@ -599,12 +601,12 @@ export function renderInsights(root) {
     h('div', { class: 'grid-3' },
       chartCard('planned', 'Planned vs unplanned', 'layers', {
         kinds: ['donut', 'bars', 'columns', 'table'], def: 'donut', note: NOTES.planned,
-        render: (kind) => itemsChart(kind, toItems(pBlk.items.filter(i => i.minutes > 0), { colour: i => COLOUR[i.key] || COLOUR.none }), 'planned',
+        render: (kind) => itemsChart(kind, toItems(pBlk.items.filter(i => i.minutes > 0), { colour: i => COLOUR[i.key] || COLOUR.none, rich: i => withIcon(plannedIcon(i.key), i.key === NOT_SET ? 'Not set' : i.key) }), 'planned',
           { label: 'Split', donut: { centre: fmt.pct(plannedShare), caption: 'planned', ariaLabel: 'Share of minutes, planned vs unplanned' } }),
       }),
       chartCard('touchType', 'Physical vs information', 'hand', {
         kinds: ['donut', 'bars', 'columns', 'table'], def: 'donut', note: 'Physical → automation; Information → digitalisation.',
-        render: (kind) => itemsChart(kind, toItems(ttBlk.items.filter(i => i.minutes > 0), { colour: i => COLOUR[i.key] || COLOUR.none }), 'touchType',
+        render: (kind) => itemsChart(kind, toItems(ttBlk.items.filter(i => i.minutes > 0), { colour: i => COLOUR[i.key] || COLOUR.none, rich: i => withIcon(touchTypeIcon(i.key), i.key === NOT_SET ? 'Not set' : i.key) }), 'touchType',
           { label: 'Touch type', donut: { centre: fmt.pct(physShare), caption: 'physical', ariaLabel: 'Share of minutes by touch type' } }),
       }),
       chartCard('share', 'Where the minutes go', 'trend', {
@@ -637,11 +639,11 @@ export function renderInsights(root) {
     h('div', { class: 'grid-2' },
       chartCard('zone', 'By zone / equipment', 'pin', {
         kinds: ['bars', 'columns', 'pareto', 'donut', 'table'], def: 'bars', note: NOTES.zone,
-        render: (kind) => itemsChart(kind, toItems(zoneItems, { colour: i => zoneColour(i.key) || COLOUR.single }), 'zone', { label: 'Zone / equipment' }),
+        render: (kind) => itemsChart(kind, toItems(zoneItems, { colour: i => zoneColour(i.key) || COLOUR.single, rich: i => withIcon(zoneIcon(i.key), i.key === NOT_SET ? 'Not set' : i.key) }), 'zone', { label: 'Zone / equipment' }),
       }),
       people.length ? chartCard('person', 'By person observed', 'users', {
         kinds: ['bars', 'columns', 'donut', 'table'], def: 'bars', note: 'Optional field: only rows where the person was recorded.',
-        render: (kind) => itemsChart(kind, toItems(people), 'who', { label: 'Person' }),
+        render: (kind) => itemsChart(kind, toItems(people, { rich: i => withIcon(personIcon(i.key), i.key === NOT_SET ? 'Not set' : i.key) }), 'who', { label: 'Person' }),
       }) : null),
 
     heatmap(filtered(sc.touches, ['zone', 'category'])),

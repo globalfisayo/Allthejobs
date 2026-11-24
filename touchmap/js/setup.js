@@ -5,12 +5,14 @@ import { state, save, createRun, markSetup, markTouch, runsList } from './store.
 import { demoTouches } from './demo.js';
 import { syncCard } from './sync-ui.js';
 import { ZONE_KEYS } from './linemap.js';
-import { h, clear, icon, toast, openModal, closeModal, confirmBox, deliverFile, pickFile, fmt, stamp, group } from './ui.js';
+import { h, clear, icon, toast, openModal, closeModal, confirmBox, deliverFile, pickFile, fmt, stamp, group, pickIcon } from './ui.js';
+import { zoneIcon, personIcon, categoryIcon, recommendIcon, CATEGORY_ICONS } from './iconmap.js';
 import { DEFAULT_COLORS, SWATCHES, applyColors, resolveColors, textOn } from './colors.js';
-import { session, signOut } from './auth.js';
+import { session } from './auth.js';
+import { logOut } from './usermenu.js';
 
 /** Change the framework in use, save it as the team's custom framework, and share it. */
-function editFramework(mutate) {
+export function editFramework(mutate) {
   const cats = JSON.parse(JSON.stringify(CATEGORIES));
   mutate(cats);
   state.framework = { categories: sortCategories(cats) };
@@ -19,15 +21,15 @@ function editFramework(mutate) {
 }
 
 /** How many logged touches use a category (and type), across every run on this device. */
-function usage(code, typeName) {
+export function usage(code, typeName) {
   let n = 0;
   for (const r of runsList()) for (const t of r.touches) if (t.category === code && (typeName == null || t.type === typeName)) n++;
   return n;
 }
 
-function typeEditor(code, existing, rerender) {
+export function typeEditor(code, existing, rerender, { zones: presetZones = [] } = {}) {
   const cat = CAT_BY_CODE[code];
-  const model = existing ? { ...existing, zones: [...(existing.zones || [])] } : { name: '', touchType: 'Physical', guide: '', zones: [], everywhere: false, hidden: false, custom: true };
+  const model = existing ? { ...existing, zones: [...(existing.zones || [])] } : { name: '', touchType: 'Physical', guide: '', zones: [...presetZones], everywhere: false, hidden: false, custom: true };
   const name = h('input', { type: 'text', value: model.name, id: 'te-name', autocomplete: 'off', placeholder: 'e.g. Robot gripper change' });
   const guide = h('textarea', { rows: '4', id: 'te-guide', placeholder: 'How to count it: what is 1 touch, what belongs in another category.' });
   guide.value = model.guide || '';
@@ -98,6 +100,18 @@ function categoryEditor(planned, existing, rerender) {
   const rule = h('textarea', { rows: '3', id: 'ce-rule', placeholder: 'When does a touch belong here? One sentence.' });
   rule.value = existing?.rule || '';
   const hidden = h('input', { type: 'checkbox', checked: !!existing?.hidden, id: 'ce-hidden' });
+  // an icon: the category's own, else one suggested from its name as it is typed
+  let chosen = existing?.icon || '';
+  const suggest = () => (existing && !existing.icon && CATEGORY_ICONS[code]) || recommendIcon(name.value, planned ? 'calendar-check' : 'circle-exclamation-point');
+  const icoView = h('span', { class: 'ce-ico' });
+  const icoNote = h('span', { class: 'muted small' });
+  const paintIco = () => { clear(icoView, icon(chosen || suggest())); icoNote.textContent = chosen ? 'Your choice' : 'Suggested from the name'; };
+  name.addEventListener('input', () => { if (!chosen) paintIco(); });
+  const icoBtn = h('button', { type: 'button', class: 'btn ghost small', onclick: async () => {
+    const pick = await pickIcon({ title: `Icon for ${code}`, current: chosen || suggest(), suggested: suggest() });
+    if (pick) { chosen = pick; paintIco(); }
+  } }, icon('shapes'), 'Change');
+  paintIco();
   const doSave = () => {
     const n = name.value.trim();
     if (!n) { toast('Give the category a name.', { tone: 'bad' }); return; }
@@ -107,8 +121,9 @@ function categoryEditor(planned, existing, rerender) {
         const c = cats.find(x => x.code === code);
         c.name = full; c.short = n; c.hidden = hidden.checked;
         if (rule.value.trim()) c.rule = rule.value.trim(); else delete c.rule;
+        if (chosen) c.icon = chosen;
       } else {
-        cats.push({ code, name: full, short: n, planned, custom: true, hidden: hidden.checked, rule: rule.value.trim() || undefined, types: [] });
+        cats.push({ code, name: full, short: n, planned, custom: true, hidden: hidden.checked, rule: rule.value.trim() || undefined, icon: chosen || suggest(), types: [] });
       }
     });
     closeModal(); toast(existing ? 'Category updated.' : `Added ${code}. Now add its touch types.`); rerender();
@@ -119,6 +134,7 @@ function categoryEditor(planned, existing, rerender) {
       h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Close', onclick: () => closeModal() }, icon('close'))),
     h('label', { class: 'f', for: 'ce-name' }, h('span', { class: 'f-label', text: 'Name' }), name),
     h('label', { class: 'f', for: 'ce-rule' }, h('span', { class: 'f-label', text: 'When it applies' }), rule),
+    h('div', { class: 'f' }, h('span', { class: 'f-label', text: 'Icon' }), h('div', { class: 'ce-ico-row' }, icoView, icoNote, icoBtn)),
     h('label', { class: 'check-row', for: 'ce-hidden' }, hidden, icon('eyeOff'), 'Hide from Capture'),
     !existing ? h('p', { class: 'muted small' }, icon('info'), ' New categories are not in the “Help me choose” questions; pick them directly.') : null,
     h('div', { class: 'row-end' },
@@ -141,7 +157,14 @@ function chipList(key, label, placeholder) {
     };
     add.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); doAdd(); } });
     clear(box,
-      h('div', { class: 'chips' }, items.map(v => h('span', { class: 'chip removable' }, v,
+      h('div', { class: 'chips' }, items.map(v => h('span', { class: 'chip removable with-ico' },
+        key === 'zones' ? h('button', { type: 'button', class: 'chip-ico', title: `Change the icon for ${v}`, 'aria-label': `Change the icon for ${v}`, onclick: async () => {
+          const pick = await pickIcon({ title: `Icon for ${v}`, current: zoneIcon(v), suggested: recommendIcon(v, 'map-pin') });
+          if (!pick) return;
+          state.icons = { ...(state.icons || {}), zones: { ...(state.icons?.zones || {}), [v]: pick } };
+          markSetup(); paint();
+        } }, icon(zoneIcon(v))) : icon(personIcon(v)),
+        v,
         items.length > 1 ? h('button', { type: 'button', class: 'chip-x', 'aria-label': `Remove ${v}`, onclick: () => { state.lists[key] = items.filter(x => x !== v); markSetup(); paint(); } }, icon('close')) : null))),
       h('div', { class: 'add-row' }, add, h('button', { type: 'button', class: 'btn ghost', onclick: doAdd }, icon('plus'), 'Add')));
   };
@@ -158,6 +181,7 @@ export function renderSetup(root, { onChange } = {}) {
     CATEGORIES.filter(c => c.planned === planned).map(c => h('details', { class: 'fw-cat' + (c.hidden ? ' is-hidden' : '') },
       h('summary', {},
         h('span', { class: 'code ' + (planned ? 'code-p' : 'code-u'), text: c.code }),
+        h('span', { class: 'cat-ico' }, icon(categoryIcon(c.code))),
         h('span', { class: 'fw-name', text: c.short }),
         c.custom ? h('span', { class: 'pill new' }, 'added') : null,
         c.hidden ? h('span', { class: 'pill off' }, icon('eyeOff'), 'hidden') : null,
@@ -278,13 +302,7 @@ function profileGroup() {
   const p = state.profile;
   const admin = session()?.role === 'admin';
   const fact = (ico, label, value) => h('div', { class: 'pf-fact' }, h('span', { class: 'pf-ico' }, icon(ico)), h('span', {}, h('span', { class: 'muted small', text: label }), h('strong', { text: value || '–' })));
-  const out = async () => {
-    const ok = await confirmBox({ title: 'Sign out of Touch Map?', body: 'Your touches stay on this device and in the team log. Sign in again with the shared login to carry on.', ok: 'Sign out' });
-    if (!ok) return;
-    signOut();
-    location.hash = '#login';
-    location.reload();
-  };
+  const out = () => logOut();
   return group('setup-profile', 'Your profile', 'user', { open: true, badge: admin ? 'admin' : null },
     h('div', { class: 'pf-facts' },
       fact('user', 'Name', p?.name),
@@ -294,5 +312,5 @@ function profileGroup() {
     h('div', { class: 'row-gap' },
       h('a', { class: 'btn ghost', href: '#welcome' }, icon('edit'), p ? 'Change plant, line or name' : 'Set up your profile'),
       admin ? h('a', { class: 'btn ghost', href: '#admin' }, icon('shield'), 'Admin: all plants') : null,
-      h('button', { type: 'button', class: 'btn ghost', onclick: out }, icon('logout'), 'Sign out')));
+      h('button', { type: 'button', class: 'btn ghost', onclick: out }, icon('logout'), 'Log out')));
 }
