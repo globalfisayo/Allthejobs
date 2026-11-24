@@ -81,6 +81,21 @@ export const PATHS = {
   database: 'M12 8c4.4 0 8-1.3 8-3s-3.6-3-8-3-8 1.3-8 3 3.6 3 8 3zM4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3',
   hash: 'M5 9h14M5 15h14M10 3L8 21M16 3l-2 18',
   sliders: 'M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6',
+  image: 'M4 5h16v14H4zM4 16l5-5 4 4 3-3 4 4M15 9h.01',
+  factory: 'M3 21V10l6 4V10l6 4V6l6 3v12zM3 21h18M7 17h2M12 17h2M17 17h2',
+  globe: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9M12 3C9.5 5.6 8.2 8.6 8.2 12s1.3 6.4 3.8 9',
+  line: 'M3 17h18M6 21l1.5-4M18 21l-1.5-4M7 17v-6l1-2V6h2v3l1 2v6M14 17v-6l1-2V6h2v3l1 2v6',
+  building: 'M4 21V5l8-3v19M12 21V9l8 3v9M2 21h20M7 8h2M7 12h2M7 16h2M15 14h2M15 18h2',
+  lock: 'M6 11h12v10H6zM8 11V7a4 4 0 0 1 8 0v4M12 15v2',
+  logout: 'M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9',
+  shield: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10zM9 12l2 2 4-4',
+  group: 'M7 7h5v5H7zM12 12h5v5h-5zM3 3h2M19 3h2M3 21h2M19 21h2M3 3v2M3 19v2M21 3v2M21 19v2',
+  ungroup: 'M4 4h6v6H4zM14 14h6v6h-6z',
+  shapes: 'M8.5 3l4.5 8H4zM17.5 21a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM4 14h7v7H4z',
+  save: 'M5 3h11l3 3v15H5zM8 3v5h7V3M8 21v-7h8v7',
+  back: 'M19 12H5M12 19l-7-7 7-7',
+  sparkle: 'M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8z',
+  filter: 'M3 5h18l-7 8v6l-4 2v-8z',
 };
 
 export function icon(name, cls = '') {

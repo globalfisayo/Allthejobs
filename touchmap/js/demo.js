@@ -3,7 +3,7 @@ import { finalise, blankTouch } from './model.js';
 import { typeInfo } from './framework.js';
 
 // [minutes from shift start, zone, category, type, count, minutes per occurrence, who, description]
-const ROWS = [
+export const ROWS = [
   [5, 'Control room / office', 'P8', 'Handover, meetings & planned calls', 4, 9, 'Shift leader', 'Shift handover at the board, each operator gives their machine status'],
   [18, 'Filler', 'P5', 'Pre-start & safety device checks', 1, 11, 'Op 2', 'Start-of-shift round: light curtains, e-stops, eyewash'],
   [32, 'Preform feed', 'P7', 'Preform loading', 22, 2.4, 'Op 1', 'Tips octabin into hopper, fetches next with pallet jack'],

@@ -90,7 +90,7 @@ function buildBody() {
   }
   const tombstones = [...s.tombstones];
   const settings = s.dirtySetup && state.setupUpdatedAt
-    ? { updatedAt: state.setupUpdatedAt, data: { framework: state.framework, lists: state.lists, colors: state.colors, diagram: state.diagram, annotations: state.annotations, chartKinds: state.chartKinds } } : undefined;
+    ? { updatedAt: state.setupUpdatedAt, data: { framework: state.framework, lists: state.lists, colors: state.colors, diagram: state.diagram, annotations: state.annotations, chartKinds: state.chartKinds, library: state.library } } : undefined;
   return { body: { app: 'touchmap', v: 2, key: s.key || undefined, since: s.since || 0, runs, touches, tombstones, settings }, sentT, sentR, tombstones, sentSetupAt: settings?.updatedAt };
 }
 
@@ -108,6 +108,7 @@ export function applyRemote(data, { firstSync = false } = {}) {
     if ('diagram' in d) state.diagram = d.diagram && Array.isArray(d.diagram.shapes) ? d.diagram : null;
     if ('annotations' in d) state.annotations = d.annotations && typeof d.annotations === 'object' ? d.annotations : {};
     if ('chartKinds' in d) state.chartKinds = d.chartKinds && typeof d.chartKinds === 'object' ? d.chartKinds : {};
+    if ('library' in d) state.library = Array.isArray(d.library) ? d.library.filter(x => x && typeof x.name === 'string' && Array.isArray(x.children)).slice(0, 80) : [];
     state.setupUpdatedAt = data.settings.updatedAt;
     s.dirtySetup = false;
     applyFramework(state.framework);

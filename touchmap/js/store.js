@@ -67,6 +67,9 @@ state.colors ??= null;       // null = the default colours
 state.diagram ??= null;      // null = the default Guide diagram
 state.annotations ??= {};    // chart id → annotation shapes
 state.chartKinds ??= {};     // chart id → chosen chart type
+state.library ??= [];        // the team's saved diagram shapes (groups), shared through Setup sync
+state.profile ??= null;      // this device's user: { name, bu, plant, line, at } from onboarding
+state.logRunId ??= null;     // run shown in the Log: null = the one being logged into, 'all' = every run
 applyFramework(state.framework);
 applyColors(state.colors);
 
@@ -233,3 +236,6 @@ export const timer = {
     return draft;
   },
 };
+
+/* ---------- this device's user ---------- */
+export const profileName = () => state.profile?.name || state.observer || '';

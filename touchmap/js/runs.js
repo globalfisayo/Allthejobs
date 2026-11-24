@@ -5,6 +5,7 @@ import { state, save, activeRun, runsList, createRun, deleteRun, nextRunName, st
 import { buildWorkbook, buildCsv, buildBackup, parseBackup } from './export.js';
 import { h, clear, icon, toast, deliverFile, pickFile, canShareFiles, confirmBox, openModal, closeModal, fmt, stamp, slug, group, fmtDuration } from './ui.js';
 import { analyseRuns } from './insights.js';
+import { showInLog } from './log.js';
 
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const view = { editId: null, selected: new Set() };
@@ -57,7 +58,7 @@ export function renderRuns(root, { onChange } = {}) {
     const names = run.info.operatorNames || [];
     return h('article', { class: 'run-card' + (isActive ? ' active' : '') + (isEdit ? ' editing' : '') },
       h('label', { class: 'rc-check', title: 'Select to compare' }, check),
-      h('button', { type: 'button', class: 'rc-main', onclick: () => { view.editId = run.id; rerender(); document.getElementById('run-details')?.scrollIntoView({ behavior: 'smooth' }); } },
+      h('button', { type: 'button', class: 'rc-main', onclick: () => { view.editId = run.id; showInLog(run.id); rerender(); document.getElementById('run-details')?.scrollIntoView({ behavior: 'smooth' }); } },
         h('span', { class: 'rc-top' },
           h('strong', { class: 'rc-name', text: run.name }),
           isActive ? h('span', { class: 'pill live' }, icon('timer'), 'Logging here') : null,
@@ -73,9 +74,10 @@ export function renderRuns(root, { onChange } = {}) {
           h('span', { style: { width: `${(st.planned / 60 / total) * 100}%`, background: 'var(--c-planned)' } }),
           h('span', { style: { width: `${(st.unplanned / 60 / total) * 100}%`, background: 'var(--c-unplanned)' } }))),
       h('div', { class: 'rc-actions' },
+        h('a', { class: 'btn ghost small', href: '#log', onclick: () => showInLog(run.id) }, icon('list'), 'Log'),
         h('button', { type: 'button', class: 'btn ghost small', onclick: () => analyseRuns([run.id]) }, icon('chart'), 'Analysis'),
         h('a', { class: 'btn ghost small', href: `#report?id=${encodeURIComponent(run.id)}` }, icon('report'), 'Report'),
-        !isActive ? h('button', { type: 'button', class: 'btn ghost small', onclick: () => { state.activeRunId = run.id; save(); toast(`Now logging into “${run.name}”.`); rerender(); } }, icon('timer'), 'Log here') : null));
+        !isActive ? h('button', { type: 'button', class: 'btn ghost small', onclick: () => { state.activeRunId = run.id; showInLog(null); toast(`Now logging into “${run.name}”.`); rerender(); } }, icon('timer'), 'Log here') : null));
   };
 
   async function newObservation() {
@@ -98,6 +100,7 @@ export function renderRuns(root, { onChange } = {}) {
     }
     const r = createRun(nextRunName());
     view.editId = r.id;
+    showInLog(null);
     toast(`${r.name} started. Earlier runs are kept below.`);
     rerender();
   }
@@ -257,8 +260,10 @@ export function renderRuns(root, { onChange } = {}) {
   const details = h('section', { class: 'run-details', id: 'run-details' },
     h('div', { class: 'details-head' },
       h('h2', {}, icon('report'), run.name),
-      isActive ? h('span', { class: 'pill live' }, icon('timer'), 'Logging here')
-        : h('button', { type: 'button', class: 'btn ghost small', onclick: () => { state.activeRunId = run.id; save(); toast(`Now logging into “${run.name}”.`); rerender(); } }, icon('timer'), 'Log into this run')),
+      h('div', { class: 'row-gap' },
+        h('a', { class: 'btn ghost small', href: '#log', onclick: () => showInLog(run.id) }, icon('list'), `Its log (${run.touches.length})`),
+        isActive ? h('span', { class: 'pill live' }, icon('timer'), 'Logging here')
+          : h('button', { type: 'button', class: 'btn ghost small', onclick: () => { state.activeRunId = run.id; showInLog(null); toast(`Now logging into “${run.name}”.`); rerender(); } }, icon('timer'), 'Log into this run'))),
 
     group('run-info', 'Observation run', 'report', { open: true },
       h('label', { class: 'f', for: 'run-name' }, h('span', { class: 'f-label', text: 'Run name' }), nameInput),

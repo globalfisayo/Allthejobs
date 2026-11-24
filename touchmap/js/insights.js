@@ -164,7 +164,7 @@ function hideTip() { if (tipEl) tipEl.hidden = true; }
 window.addEventListener('scroll', hideTip, { passive: true });
 
 /** Hover/focus shows details; click, Enter or Space applies the filter. */
-function interactive(el, { lead, rest = [], onPick, label }) {
+export function interactive(el, { lead, rest = [], onPick, label }) {
   el.tabIndex = 0;
   el.setAttribute('role', 'button');
   if (label) el.setAttribute('aria-label', label);
@@ -289,7 +289,7 @@ function itemsChart(kind, items, dim, opts = {}) {
   if (!items.length || !items.some(i => i.value > 0)) return h('p', { class: 'empty', text: 'Nothing logged here yet.' });
   if (kind === 'donut') return donutChart(items, ctx, opts.donut || {});
   if (kind === 'columns') return catColumns(items, ctx);
-  if (kind === 'pareto') return paretoChart(items, ctx);
+  if (kind === 'pareto') return paretoChart(items, ctx, { label: opts.label || 'Item' });
   if (kind === 'table') return itemsTable(items, { label: opts.label || 'Item', cum: opts.cum });
   return hbars(items, ctx, { highlight: opts.highlight || (() => false) });
 }
@@ -315,10 +315,9 @@ function shiftCard(touches) {
   const hours = [];
   if (keys.length) for (let x = Math.min(...keys); x <= Math.max(...keys); x++) hours.push(String(x).padStart(2, '0'));
   const rows = hours.map(k => ({ k, ...(buckets.get(k) || { Planned: 0, Unplanned: 0, none: 0, touches: 0 }) }));
-  const totalAll = rows.reduce((s2, r) => s2 + r.Planned + r.Unplanned + r.none, 0);
   return chartCard('shift', 'When in the shift', 'clock', {
-    kinds: ['columns', 'combo', 'line', 'table'], def: 'columns',
-    note: 'Mapped minutes by the hour each touch started. “Columns + line” adds the running share of the shift’s minutes on its own % scale. Tap an hour to filter.',
+    kinds: ['columns', 'line', 'table'], def: 'columns',
+    note: 'Mapped minutes by the hour each touch started. Tap an hour to filter.',
     before: (kind) => (kind === 'table' ? null : legendRow()),
     render: (kind) => {
       if (!rows.length) return h('p', { class: 'empty', text: 'No timed touches yet.' });
@@ -329,9 +328,7 @@ function shiftCard(touches) {
         { label: 'Planned', colour: COLOUR.Planned, values: rows.map(r => r.Planned) },
         { label: 'Unplanned', colour: COLOUR.Unplanned, values: rows.map(r => r.Unplanned) }], ctx);
       if (kind === 'table') return itemsTable(rows.map(r => ({ key: r.k, label: `${r.k}:00–${r.k}:59`, value: r.Planned + r.Unplanned + r.none, touches: r.touches })), { label: 'Hour' });
-      let run = 0;
-      const cum = rows.map(r => { run += r.Planned + r.Unplanned + r.none; return totalAll ? run / totalAll : 0; });
-      return columns(cols, ctx, kind === 'combo' ? { line: { values: cum, label: 'Share of the shift so far' } } : {});
+      return columns(cols, ctx);
     },
   });
 }
@@ -611,7 +608,7 @@ export function renderInsights(root) {
           { label: 'Touch type', donut: { centre: fmt.pct(physShare), caption: 'physical', ariaLabel: 'Share of minutes by touch type' } }),
       }),
       chartCard('share', 'Where the minutes go', 'trend', {
-        kinds: ['donut', 'pareto', 'bars', 'columns', 'table'], def: 'donut', note: 'By category. The donut shows the five biggest and folds the rest into Other; Pareto adds the running share with an 80% mark.',
+        kinds: ['donut', 'pareto', 'bars', 'columns', 'table'], def: 'donut', note: 'By category. The donut shows the five biggest and folds the rest into Other; Pareto ranks them biggest first with the top three marked, and the running share in the table.',
         render: (kind) => itemsChart(kind, toItems(catA.catPareto, { label: i => CAT_BY_CODE[i.key]?.name || i.key, short: i => i.key, rich: i => catLabel(i, true), colour: catColour }), 'category',
           { label: 'Category', cum: true, donut: { centre: fmt.int(catTotal), caption: 'minutes', ariaLabel: 'Share of minutes by category', maxParts: 6 } }),
       })),

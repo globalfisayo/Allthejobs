@@ -5,7 +5,7 @@ import { CAT_BY_CODE, CATEGORIES, typeInfo } from './framework.js';
 import { totalMinutes, setCategory, setType, fmtMin } from './model.js';
 import { state, save, activeRun } from './store.js';
 import { h, clear, icon, toast, openModal, closeModal, fmt } from './ui.js';
-import { createBoard } from './board.js';
+import { createBoard, bodyBox } from './board.js';
 import { diagramDoc, defaultDiagram, zonesOnDiagram } from './diagram.js';
 import { zoneColour } from './colors.js';
 
@@ -149,7 +149,7 @@ export function lineMapCard() {
       zoneLabel: (sh) => { const c = counts[sh.zone]; return `${sh.zone}. ${typesAt(sh.zone).length} typical touches${c?.rows ? `. Logged in this run: ${c.touches} touches, ${fmtMin(c.minutes)} minutes` : ''}`; },
       fillFor: (sh) => {
         if (!sh.zone || sh.fill !== 'auto') return null;
-        if (heat) { const hv = heatOf(counts[sh.zone]?.minutes, max); return hv ? hv.fill : '#FFFFFF'; }
+        if (heat) { const hv = heatOf(counts[sh.zone]?.minutes, max); return hv ? hv.fill : (sh.type === 'line' ? null : '#FFFFFF'); }
         const zc = zoneColour(sh.zone);
         return zc ? tint(zc, 0.28) : null;
       },
@@ -160,12 +160,16 @@ export function lineMapCard() {
         if (heat && !n) return;
         const label = heat ? fmt.int(n) : String(n);
         const w = Math.max(26, 10 + label.length * 8);
-        const bx = sh.x + sh.w - 4, by = sh.y + 4;
+        // on the outline's top-right corner (a circle's shoulder); beside a text label
+        const b = bodyBox(sh);
+        const round = b.type === 'ellipse';
+        const [bx, by] = b.type === 'text' ? [b.x + b.w + 8 + w / 2, b.y + b.h / 2]
+          : round ? [b.x + b.w * 0.9, b.y + b.h * 0.1] : [b.x + b.w - 4, b.y + 4];
         const NS = 'http://www.w3.org/2000/svg';
-        const b = document.createElementNS(NS, 'g'); b.setAttribute('class', 'lm-badge' + (heat ? ' run' : ''));
+        const badge = document.createElementNS(NS, 'g'); badge.setAttribute('class', 'lm-badge' + (heat ? ' run' : ''));
         const r = document.createElementNS(NS, 'rect'); Object.entries({ x: bx - w / 2, y: by - 13, width: w, height: 26, rx: 13 }).forEach(([k, v]) => r.setAttribute(k, v));
         const t = document.createElementNS(NS, 'text'); Object.entries({ x: bx, y: by + 5, class: 'lm-badge-t' }).forEach(([k, v]) => t.setAttribute(k, v)); t.textContent = label;
-        b.append(r, t); g.append(b);
+        badge.append(r, t); g.append(badge);
         if (heat && heatOf(counts[sh.zone]?.minutes, max)?.dark) g.classList.add('hot-dark');
       },
     });

@@ -12,6 +12,58 @@ It works offline after the first visit, so patchy Wi-Fi on the line doesn't matt
 
 **Live (once GitHub Pages is on):** `https://globalfisayo.github.io/Allthejobs/touchmap/`
 
+## Signing in and your profile
+
+- **One shared login for the organisation**, and a second password for admins (no personal
+  accounts or e-mail yet). Ask your CI lead for them.
+- **First sign-in on a device** walks through a short setup, one step at a time:
+  1. **Business unit:** Romania.
+  2. **Plant:** Ploiești is live. Timișoara and Poiana Negri show greyed out until they go
+     live.
+  3. **Production line:** K3 at Ploiești, or type another line.
+  4. **Your name.**
+  Plant and name are required. Each finished step folds into a one-line summary you can
+  change.
+- **Tagging:** every run and touch is tagged with that plant and line, and with your name as
+  the observer.
+- **Changing it later:** Setup → Your profile changes the plant, line or name, and signs
+  out.
+- **Changing a password:** run `node tools/hash-login.mjs <username> <password>` and put the
+  new hash in `js/auth.js`. Only salted hashes are in the code, never the passwords.
+- **What the login does and doesn't do:** it keeps casual visitors out of the app. It is not
+  a security boundary, because the site is public. The team's data is protected by the
+  Google Sheet's own sharing settings.
+
+## Admin: all plants
+
+Admins see a shield next to the gear. It opens one page for the whole business unit.
+
+- **Drill down** Romania → plant → line → observation. Each level shows its children as
+  cards, with hours, touches, the planned share, a planned/unplanned split, the number of
+  observations and the last observation date.
+- **Charts for the current level:**
+  - planned vs unplanned by plant, line, observation or zone;
+  - where the minutes go (Pareto, donut or table);
+  - physical vs information;
+  - by zone;
+  - a category heat matrix;
+  - the trend by day;
+  - the top twelve touch types, with how many plants each appears in;
+  - every observation;
+  - every observer.
+- **Filters:** tap any bar, slice or cell to filter the whole page, and tap it again to
+  clear it. The period switch narrows to the last 7, 30 or 90 days.
+- **CSV export:** downloads every touch in scope, with business unit, plant and line columns.
+- **Demo data:** fills Timișoara and Poiana Negri with believable observations, so the
+  roll-out can be presented before they go live. If Ploiești has no real data yet, it gets a
+  preview too.
+  - Each line has its own profile: one fights breakdowns, one is changeover-heavy, and the
+    water lines have no syrup room.
+  - The numbers are the same every time, are marked *Demo*, stay on that device, never reach
+    the team sheet, and **Clear demo** removes them.
+- **Where the data comes from:** everything the device holds. Connect the admin's device to
+  the same team log (Setup → Team sync) and it shows every plant that syncs there.
+
 ## On the line
 
 1. Open the link in Safari on the iPad, then **Share → Add to Home Screen**. It opens
@@ -49,6 +101,11 @@ It works offline after the first visit, so patchy Wi-Fi on the line doesn't matt
    or tap it to open the editor. A short swipe springs back, and scrolling up and down
    works as normal. Touches saved with **Next touch** that still need answers are flagged
    *Needs details*.
+
+   **Which run it shows:** the run you're logging into by default. Select a run in **Runs**
+   (or tap its **Log** button) and the Log shows that run's history instead. The picker at
+   the top switches to any run, or to **All runs**. A note says where new touches go, with
+   *Log into this run* and *Back*. Edits and deletes apply to the run the touch belongs to.
 5. **Analysis** tab: everything on the template's Analysis sheet, interactive, for one
    run, several, or all. See [Analysis and presenting](#analysis-and-presenting).
 6. **Finish observation** (Runs → Observation time & finish): fixes the run and opens its
@@ -122,6 +179,7 @@ operators × observed hours, less the same share of breaks as a full shift.
 
 ## Setup (gear icon)
 
+- **Your profile:** name, business unit, plant and line. Change them or sign out here.
 - **Touch types.** Every planned (P) and unplanned (U) category with its types:
   - add a touch type, with its touch type, its *How to count* text and where it happens;
   - edit or rename a type (logged touches follow the rename);
@@ -138,8 +196,8 @@ operators × observed hours, less the same share of breaks as a full shift.
   export/import of the setup as a file.
 
 The defaults are exactly the template's framework. With Team sync, Setup changes reach
-every device: touch types, zones, people, colours, the line diagram, chart types and chart
-notes. They
+every device: touch types, zones, people, colours, the line diagram, the shape library,
+chart types and chart notes. They
 need the **updated sync script** (version 2). If your sheet runs the
 first version, paste the new `sync/apps-script.gs` into Apps Script, then **Deploy →
 Manage deployments → Edit → Version: New version → Deploy**. The web app URL stays the
@@ -152,11 +210,19 @@ The Guide's line map is an editable drawing, so it can follow changes on the lin
 
 - **Shapes:** rectangles (with rounded corners), circles and ellipses, triangles, diamonds
   and hoppers.
+- **Groups:** select several shapes (drag a box round them), then **Group** (Ctrl/Cmd+G).
+  They move, resize and link to a zone as one piece, such as a filler drawn from rings and
+  pockets. **Ungroup** splits it again. Double-tap a group to edit its name.
+- **Library:** select a group, name it and **Save**. It goes into the shared library, which
+  every device on the team log receives through Setup sync. **Library** in the toolbar
+  inserts your team's shapes and the 14 K3 machines.
 - **Text:** a text tool, and text inside any shape (double-tap it).
 - **Lines and arrows:**
   - they **snap to the four dots on a shape and follow it** when it moves;
   - straight or elbow;
-  - solid, dashed or dotted;
+  - bendable: drag the small square in the middle of a line to add a bend; drag a bend to
+    move it;
+  - solid, dashed, dotted or **conveyor** (a belt with flow chevrons);
   - arrowheads at either or both ends.
 - **Images and icons:** upload or paste images (resized to at most 1200 px); icons from the
   app's set.
@@ -169,7 +235,9 @@ The Guide's line map is an editable drawing, so it can follow changes on the lin
 - **Zone link:** link a shape to a zone and tapping it in the Guide opens that zone's
   touches. *This run* shades linked shapes by minutes logged.
 - **Export:** PNG or SVG.
-- **Reset:** returns to the default K3 line.
+- **Reset:** returns to the default K3 line. The default has the detail of the first Guide
+  map: the filler's pockets, the blow moulder's cavities, preforms in the hopper, the
+  packer's film, pallet layers and the conveyor's flow. Every machine is an editable group.
 
 The Guide always follows the touch types. Each type carries the zones where it happens
 (and whether it can happen on any machine), so a type added, renamed or hidden in Setup
@@ -187,7 +255,8 @@ The Analysis tab rebuilds the template's Analysis sheet and goes further:
 - **Which lever applies:** a 2 × 2 of Planned/Unplanned × Physical/Information. Each
   quadrant shows its minutes and lever (automate by design, digitalise, fix reliability).
 - **When in the shift:** minutes by start hour, stacked planned/unplanned.
-- **By category:** a Pareto with the top three called out, or P1 → U7 order.
+- **By category:** biggest first with the top three called out (the Pareto), or P1 → U7
+  order.
 - **By zone** and **by person**.
 - **Where × why:** a zone × category heatmap.
 - **Types of touch:** a table you can sort by total minutes, by frequency (automation
@@ -204,17 +273,15 @@ done on different days.
 |---|---|
 | Planned vs unplanned, Physical vs information | Donut, bars, columns, table |
 | Where the minutes go, By category, By zone | Bars, columns, **Pareto**, donut, table |
-| When in the shift | Stacked columns, **columns + line**, lines, table |
+| When in the shift | Stacked columns, lines, table |
 | Runs compared | Bars, columns, lines, table |
 | Types of touch | Sortable table, bars, Pareto |
 
 The chosen type is remembered for the team.
 
-**Pareto, an exception to "one axis".** It is the one chart with two scales. Minutes show
-as columns on the left axis. The running share shows as a line on its own clearly
-labelled 0–100% axis on the right, with an 80% mark. That's the standard Lean Pareto,
-used to pick the few categories that make the most minutes. Every other combined chart
-uses a single unit.
+**Pareto** is drawn as the Analysis sheet had it: bars biggest first, with the top three
+marked. Each bar's details give its rank and the cumulative share. A table underneath lists
+the cumulative share row by row. There is no cumulative line on a second axis.
 
 **Notes on charts.** The ✎ on a chart adds text, arrows, lines, shapes, icons, and images
 you upload or paste, drawn over the chart. Notes are positioned relative to the chart, so
@@ -288,10 +355,14 @@ node tests/mock-sync-server.mjs 8790  # local stand-in for the Apps Script; conn
 |---|---|
 | `js/stopwatch.js`, `js/minibar.js` | One shared stopwatch; the bar on every screen |
 | `js/runs.js`, `js/report.js` | Runs history and details; the summary report |
-| `js/setup.js` | Setup: touch framework editor, zones, people, sync, device |
+| `js/setup.js` | Setup: profile, touch framework editor, zones, people, sync, device |
+| `js/auth.js`, `tools/hash-login.mjs` | The shared logins (salted hashes) and the tool that makes a hash |
+| `js/org.js` | Business units → plants → lines; which plants are live |
+| `js/onboard.js` | Sign-in page and the step-by-step profile setup |
+| `js/admin.js`, `js/demo-org.js` | Admin: all plants with drill-down; demo data for plants not live yet |
 | `js/linemap.js`, `js/zonemap.js` | The Guide map card and zone popups; the default zone for each of the 74 types |
-| `js/board.js` | The whiteboard: shapes, connectors, snapping, images, undo/redo, export |
-| `js/diagram.js` | The default K3 line as shapes, and the diagram editor page |
+| `js/board.js` | The whiteboard: shapes, groups, connectors with bends, snapping, images, library, undo/redo, export |
+| `js/diagram.js` | The default K3 line as grouped machines, the built-in library, and the diagram editor page |
 | `js/charts.js`, `js/annotate.js` | Chart renderers behind the type switch; notes drawn over charts |
 | `js/colors.js` | Team colours applied as CSS variables |
 | `js/swipe.js` | Swipe left/right on log rows |
