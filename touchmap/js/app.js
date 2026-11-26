@@ -20,6 +20,7 @@ import { initMinibar, showMinibar } from './minibar.js';
 import { paintAvatar } from './usermenu.js';
 import { initTabs } from './tabs.js';
 import { setPassive } from './store.js';
+import { maybeTutorial } from './tutorials.js';
 
 // Each view renders into the main element; one that keeps timers or listeners returns a cleanup.
 const ROUTES = {
@@ -107,6 +108,7 @@ function renderRoute({ keepScroll = false } = {}) {
   showMinibar(!GATES.has(r) && r !== 'capture' && r !== 'admin');
   if (!GATES.has(r)) paintChrome();
   window.scrollTo(0, keepScroll ? y : 0);
+  if (!GATES.has(r) && !keepScroll) maybeTutorial(r);
 }
 
 // When another device's touches arrive, refresh the views that show them (not Capture, Runs or

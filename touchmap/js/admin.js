@@ -8,10 +8,11 @@ import { state } from './store.js';
 import { status as syncStatus } from './sync.js';
 import { ORG, allPlants, plantOf, lineOf } from './org.js';
 import { demoRuns, demoLoadedAt, loadOrgDemo, clearOrgDemo } from './demo-org.js';
-import { hbars, columns, donut, lines as linesChart, table as itemsTable, pareto, kindSwitch } from './charts.js';
+import { hbars, columns, donut, lines as linesChart, table as itemsTable, kindSwitch } from './charts.js';
 import { interactive } from './insights.js';
 import { zoneColour } from './colors.js';
 import { zoneIcon, categoryIcon } from './iconmap.js';
+import { rankList, colsFor, setCols, columnsButton } from './rank.js';
 import { h, clear, icon, fmt, toast, confirmBox, infoNote, deliverFile, stamp } from './ui.js';
 
 const COLOUR = {
@@ -20,7 +21,7 @@ const COLOUR = {
 };
 // Where you are (drill path) and what is picked (filters), kept while the app is open.
 const S = { plant: '', line: '', run: '', period: 'all', planned: '', category: '', zone: '', touchType: '', type: '' };
-const K = { share: 'pareto', zone: 'bars' };
+const K = { share: 'pareto', zone: 'bars', shareBy: 'minutes', shareLevel: 'categories' };
 const FILTERS = ['planned', 'category', 'zone', 'touchType', 'type'];
 let rootEl = null;
 
@@ -118,9 +119,11 @@ function split(planned, unplanned) {
   return h('div', { class: 'adm-split', role: 'img', 'aria-label': sum ? `Planned ${fmt.pct(planned / sum)}, unplanned ${fmt.pct(unplanned / sum)}` : 'No minutes yet' },
     sum ? [h('span', { style: { width: `${(planned / sum) * 100}%`, background: COLOUR.Planned } }), h('span', { style: { width: `${(unplanned / sum) * 100}%`, background: COLOUR.Unplanned } })] : h('span', { class: 'empty-track' }));
 }
-function card(title, ico, body, { kinds, kind, onKind, note, cls = '' } = {}) {
+function card(title, ico, body, { kinds, kind, onKind, note, cls = '', tools = null, before = null } = {}) {
   return h('section', { class: 'card adm-card ' + cls },
-    h('div', { class: 'chart-head' }, h('h2', { class: 'card-h' }, icon(ico), title), kinds ? kindSwitch(kinds, kind, onKind) : null),
+    h('div', { class: 'chart-head' }, h('h2', { class: 'card-h' }, icon(ico), title),
+      tools || kinds ? h('div', { class: 'chart-tools' }, tools, kinds ? kindSwitch(kinds, kind, onKind) : null) : null),
+    before,
     body,
     note ? infoNote(note) : null);
 }
@@ -432,15 +435,39 @@ export function renderAdmin(root) {
     h('div', { class: 'grid-2' },
       card(`Planned vs unplanned by ${kidsAll.noun}`, 'chart', byChild(kidsAll), { note: 'Mapped minutes in each, split planned and unplanned. Tap a column to open it.' }),
       card('Where the minutes go', 'trend', (() => {
-        const items = toItems(catTally, { label: v => CAT_BY_CODE[v.key]?.name || v.key, colour: v => (CAT_BY_CODE[v.key]?.planned ? COLOUR.Planned : COLOUR.Unplanned) });
+        const types = K.shareLevel === 'types';
         const all = [...tally(scoped(ds, 'category'), t => t.category || '').values()].filter(v => v.key).sort((a, b) => b.minutes - a.minutes);
         const allItems = toItems(all, { label: v => CAT_BY_CODE[v.key]?.name || v.key, colour: v => (CAT_BY_CODE[v.key]?.planned ? COLOUR.Planned : COLOUR.Unplanned),
           rich: v => h('span', { class: 'bl' }, h('span', { class: 'code ' + (CAT_BY_CODE[v.key]?.planned ? 'code-p' : 'code-u'), text: v.key }), icon(categoryIcon(v.key), 'lbl-ico'), h('span', { text: CAT_BY_CODE[v.key]?.short || v.key })) });
         if (!allItems.length) return h('p', { class: 'empty', text: 'Nothing logged in this scope yet.' });
-        const ctx = ctxFor('category');
-        return K.share === 'donut' ? donut(allItems, ctx, { centre: fmt.dec(total(scoped(ds, 'category')) / 60, 0), caption: 'hours', ariaLabel: 'Minutes by category', maxParts: 6 })
-          : K.share === 'table' ? itemsTable(allItems, { label: 'Category', cum: true }) : pareto(allItems, ctx, { label: 'Category' });
-      })(), { kinds: ['pareto', 'donut', 'table'], kind: K.share, onKind: (k) => { K.share = k; rerender(); }, note: 'By category, biggest first with the top three marked. Tap one to filter the page.' })),
+        if (K.share === 'donut') return donut(allItems, ctxFor('category'), { centre: fmt.dec(total(scoped(ds, 'category')) / 60, 0), caption: 'hours', ariaLabel: 'Minutes by category', maxParts: 6 });
+        if (K.share === 'table') return itemsTable(allItems, { label: 'Category', cum: true });
+        // the Pareto, with the same columns as in Analysis
+        const by = K.shareBy;
+        const mv = (v) => (by === 'touches' ? v.touches : v.minutes);
+        const typeRows = [...tally(scoped(ds, types ? 'type' : 'category'), typeKey).values()].filter(v => v.key).map(v => {
+          const [code, name] = v.key.split('\u0000'); return { ...v, code, name };
+        });
+        const rows = types
+          ? typeRows.map(v => { const c = CAT_BY_CODE[v.code]; return { key: v.key, code: v.code, planned: c ? c.planned : null, icon: categoryIcon(v.code), category: c?.short || v.code, categoryFull: c?.name, type: v.name, minutes: v.minutes, touches: v.touches, colour: c?.planned ? COLOUR.Planned : COLOUR.Unplanned }; })
+          : all.map(v => {
+            const c = CAT_BY_CODE[v.key];
+            const mine = typeRows.filter(r => r.code === v.key).sort((x, y) => mv(y) - mv(x));
+            return { key: v.key, code: v.key, planned: c ? c.planned : null, icon: categoryIcon(v.key), category: c?.short || v.key, categoryFull: c?.name, type: mine[0]?.name || '', typeMore: Math.max(0, mine.length - 1), minutes: v.minutes, touches: v.touches, colour: c?.planned ? COLOUR.Planned : COLOUR.Unplanned };
+          });
+        const shown = types ? [...rows].sort((x, y) => mv(y) - mv(x)).slice(0, 25) : rows;
+        return h('div', { class: 'pareto' },
+          rankList(shown, ctxFor(types ? 'type' : 'category'), { cfg: colsFor('adm-category'), measure: by, mode: types ? 'types' : 'categories', onCfg: (cfg) => { setCols('adm-category', cfg); rerender(); } }),
+          h('details', { class: 'tbl-wrap' }, h('summary', { text: 'Table with the cumulative share' }),
+            itemsTable(rows.map(r => ({ key: r.key, label: [r.code, types ? r.type : r.categoryFull || r.category].filter(Boolean).join(' · '), value: r.minutes, touches: r.touches })), { label: types ? 'Type of touch' : 'Category', cum: true })));
+      })(), { kinds: ['pareto', 'donut', 'table'], kind: K.share, onKind: (k) => { K.share = k; rerender(); },
+        note: 'By category, biggest first with the top three marked. Tap one to filter the page.',
+        tools: K.share === 'pareto' ? columnsButton('adm-category', { mode: K.shareLevel, onChange: rerender }) : null,
+        before: K.share === 'pareto' ? h('div', { class: 'card-tools adm-rank-tools' },
+          h('div', { class: 'seg small', role: 'group', 'aria-label': 'Detail' }, [['categories', 'Categories', 'chevrons-down-up'], ['types', 'All types', 'chevrons-up-down']].map(([k, t, ico]) => h('button', {
+            type: 'button', class: 'seg-btn' + (K.shareLevel === k ? ' on' : ''), 'aria-pressed': String(K.shareLevel === k), onclick: () => { K.shareLevel = k; rerender(); } }, icon(ico), t))),
+          h('div', { class: 'seg small rank-by', role: 'group', 'aria-label': 'Rank by' }, h('span', { class: 'seg-lbl', text: 'Rank by' }), [['minutes', 'Minutes', 'timer'], ['touches', 'Touches', 'hand']].map(([k, t, ico]) => h('button', {
+            type: 'button', class: 'seg-btn' + (K.shareBy === k ? ' on' : ''), 'aria-pressed': String(K.shareBy === k), onclick: () => { K.shareBy = k; rerender(); } }, icon(ico), t)))) : null })),
 
     h('div', { class: 'grid-2' },
       card('Physical vs information', 'hand', (() => {

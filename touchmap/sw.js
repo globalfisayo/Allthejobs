@@ -1,13 +1,13 @@
 // Offline shell: everything the app needs is cached on first visit, so it works on a
 // line with no Wi-Fi. Bump VERSION when files change; old caches are dropped.
-const VERSION = 'touchmap-v9';
+const VERSION = 'touchmap-v10';
 const FILES = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css',
   'js/app.js', 'js/framework.js', 'js/framework-data.js', 'js/model.js', 'js/store.js', 'js/ui.js',
   'js/form.js', 'js/capture.js', 'js/log.js', 'js/insights.js', 'js/analysis.js', 'js/runs.js', 'js/report.js', 'js/setup.js', 'js/stopwatch.js', 'js/minibar.js',
   'js/guide.js', 'js/export.js', 'js/xlsx.js', 'js/demo.js', 'js/sync.js', 'js/sync-ui.js', 'js/linemap.js', 'js/swipe.js', 'js/zonemap.js', 'js/board.js', 'js/diagram.js', 'js/charts.js', 'js/annotate.js', 'js/colors.js',
   'js/auth.js', 'js/org.js', 'js/onboard.js', 'js/admin.js', 'js/demo-org.js',
-  'js/icons-lib.js', 'js/iconmap.js', 'js/usermenu.js', 'js/tabs.js', 'sync/apps-script.gs',
+  'js/icons-lib.js', 'js/iconmap.js', 'js/usermenu.js', 'js/tabs.js', 'js/rank.js', 'js/sortable.js', 'js/tutorials.js', 'sync/apps-script.gs',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png', 'icons/icon-maskable-512.png',
 ];
 
@@ -25,7 +25,10 @@ self.addEventListener('activate', (e) => {
 // and picks up a new version on the next launch after it was fetched.
 self.addEventListener('fetch', (e) => {
   const req = e.request;
-  if (req.method !== 'GET' || new URL(req.url).origin !== location.origin) return;
+  const url = new URL(req.url);
+  if (req.method !== 'GET' || url.origin !== location.origin) return;
+  // tutorial videos stream straight from the network (range requests; too big to keep offline)
+  if (url.pathname.includes('/media/')) return;
   e.respondWith(caches.open(VERSION).then(async (cache) => {
     const hit = await cache.match(req, { ignoreSearch: true });
     const refresh = fetch(req).then(res => { if (res.ok) cache.put(req, res.clone()); return res; }).catch(() => null);

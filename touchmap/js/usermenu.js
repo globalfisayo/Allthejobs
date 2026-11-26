@@ -4,6 +4,7 @@
 import { state, save } from './store.js';
 import { session, signOut, isAdmin } from './auth.js';
 import { h, clear, icon, confirmBox } from './ui.js';
+import { openTutorials } from './tutorials.js';
 
 const initials = (name) => String(name || '').trim().split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join('') || '?';
 
@@ -41,6 +42,7 @@ function openMenu(btn) {
     h('a', { class: 'um-item', role: 'menuitem', href: '#welcome', onclick: closeMenu }, icon('user'), 'Your profile'),
     admin ? h('a', { class: 'um-item', role: 'menuitem', href: '#admin', onclick: closeMenu }, icon('shield'), 'Admin: all plants') : null,
     h('a', { class: 'um-item', role: 'menuitem', href: '#setup', onclick: closeMenu }, icon('gear'), 'Setup'),
+    h('button', { type: 'button', class: 'um-item', role: 'menuitem', onclick: () => { closeMenu(); openTutorials(); } }, icon('graduation-cap'), 'Tutorials'),
     h('button', { type: 'button', class: 'um-item danger', role: 'menuitem', onclick: () => { closeMenu(); logOut(); } }, icon('logout'), 'Log out'));
   document.body.append(menuEl);
   const r = btn.getBoundingClientRect();

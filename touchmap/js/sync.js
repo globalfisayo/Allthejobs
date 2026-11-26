@@ -90,7 +90,7 @@ function buildBody() {
   }
   const tombstones = [...s.tombstones];
   const settings = s.dirtySetup && state.setupUpdatedAt
-    ? { updatedAt: state.setupUpdatedAt, data: { framework: state.framework, lists: state.lists, colors: state.colors, diagram: state.diagram, annotations: state.annotations, chartKinds: state.chartKinds, library: state.library, icons: state.icons, lineDrawings: state.lineDrawings } } : undefined;
+    ? { updatedAt: state.setupUpdatedAt, data: { framework: state.framework, lists: state.lists, colors: state.colors, diagram: state.diagram, annotations: state.annotations, chartKinds: state.chartKinds, chartCols: state.chartCols, tiles: state.tiles, library: state.library, icons: state.icons, lineDrawings: state.lineDrawings } } : undefined;
   return { body: { app: 'touchmap', v: 2, key: s.key || undefined, since: s.since || 0, runs, touches, tombstones, settings }, sentT, sentR, tombstones, sentSetupAt: settings?.updatedAt };
 }
 
@@ -108,6 +108,8 @@ export function applyRemote(data, { firstSync = false } = {}) {
     if ('diagram' in d) state.diagram = d.diagram && Array.isArray(d.diagram.shapes) ? d.diagram : null;
     if ('annotations' in d) state.annotations = d.annotations && typeof d.annotations === 'object' ? d.annotations : {};
     if ('chartKinds' in d) state.chartKinds = d.chartKinds && typeof d.chartKinds === 'object' ? d.chartKinds : {};
+    if ('chartCols' in d) state.chartCols = d.chartCols && typeof d.chartCols === 'object' && !Array.isArray(d.chartCols) ? d.chartCols : {};
+    if ('tiles' in d) state.tiles = Array.isArray(d.tiles) && d.tiles.length === 3 && d.tiles.every(x => typeof x === 'string') ? d.tiles : null;
     if ('icons' in d) state.icons = d.icons && typeof d.icons === 'object' && d.icons.zones && typeof d.icons.zones === 'object' ? { zones: Object.fromEntries(Object.entries(d.icons.zones).filter(([k, v]) => typeof v === 'string')) } : { zones: {} };
     if ('lineDrawings' in d) state.lineDrawings = Array.isArray(d.lineDrawings) ? d.lineDrawings.filter(x => x && typeof x.id === 'string' && typeof x.name === 'string' && Array.isArray(x.shapes)).slice(0, 60) : [];
     if ('library' in d) state.library = Array.isArray(d.library) ? d.library.filter(x => x && typeof x.name === 'string' && Array.isArray(x.children)).slice(0, 80) : [];

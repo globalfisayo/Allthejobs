@@ -7,7 +7,7 @@ export function h(tag, attrs = {}, ...kids) {
     if (v == null || v === false) continue;
     if (k === 'class') el.className = v;
     else if (k === 'text') el.textContent = v;
-    else if (k === 'style' && typeof v === 'object') Object.assign(el.style, v);
+    else if (k === 'style' && typeof v === 'object') { for (const [p, x] of Object.entries(v)) { if (x == null) continue; if (p.startsWith('--')) el.style.setProperty(p, x); else el.style[p] = x; } }
     else if (k.startsWith('on') && typeof v === 'function') el.addEventListener(k.slice(2).toLowerCase(), v);
     else if (k === 'dataset') Object.assign(el.dataset, v);
     else if (v === true) el.setAttribute(k, '');
@@ -156,6 +156,7 @@ export function icon(name, cls = '') {
 let toastTimer = null;
 export function toast(msg, { action, timeout = 4500, tone = '' } = {}) {
   const el = document.getElementById('toast');
+  if (!el) return;
   clearTimeout(toastTimer);
   clear(el, h('span', { class: 'toast-msg', text: msg }),
     action ? h('button', { class: 'toast-act', type: 'button', onclick: () => { el.hidden = true; action.fn(); } }, action.label) : null);

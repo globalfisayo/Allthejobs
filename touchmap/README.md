@@ -20,7 +20,8 @@ It works offline after the first visit, so patchy Wi-Fi on the line doesn't matt
 - **Admins** (the admin password) also:
   - edit the Guide drawing (Edit diagram) and the touches at a zone (Edit touches);
   - change the touch types, colours, zones and people in Setup;
-  - write notes on charts and set the team's chart types;
+  - write notes on charts and set the team's chart types, Pareto columns and Analysis tiles
+    (anyone can choose their own; theirs stays on their device);
   - delete runs that hold other people's touches;
   - see All plants.
 
@@ -310,7 +311,16 @@ The Analysis tab, from the top:
 
 - **Filters** for runs, days, observers, planned/unplanned, categories, zones, touch type
   and person. **Present** (the presenter icon) goes full screen for a meeting room.
-- **Touches, mapped minutes and mapped op-hours.**
+- **Three tiles**, by default touches, mapped minutes and the biggest category.
+  - Tap **Touches** or **Mapped minutes** to put that measure on the process map *and* the
+    Pareto. Each card can still choose its own measure; tapping a tile again brings both
+    back in line.
+  - Tap a tile that names something (biggest category, busiest machine, biggest type of
+    touch, planned share…) to filter the page to it; tap again to clear.
+  - The pencil on a tile changes what it shows: touches, mapped minutes, op-hours, biggest
+    category, biggest type of touch, busiest machine, planned share, unplanned minutes,
+    physical share or minutes per touch. A user's choice stays on their device; an admin's
+    becomes the team's default.
 - **The process map:** the line drawing, shaded from white (nothing) to Coca-Cola red (the
   most).
   - **Show:** touches, time in minutes, or logged events. **Planned / unplanned** filters
@@ -323,7 +333,16 @@ The Analysis tab, from the top:
 - **Planned vs unplanned** and **Physical vs information.**
 - **By category:**
   - It's a Pareto by default: biggest first, top three marked, with the cumulative share in
-    the table.
+    the table. **Rank by** minutes or touches (it follows the tiles until you choose).
+  - **Columns**, left to right by default: the code chip (P1 … U8), the icon, the category,
+    the type of touch (for a category, its biggest one, "+3" for the others) and the bar.
+    Drag a column's name sideways to move it, or tap its × to hide it. The columns button
+    (next to the chart types) lists them all: tick to show or hide, drag the handle or use
+    the arrows to reorder, and choose what the bar shows: %, minutes, touches, any one, two
+    or all three. The number it is ranked by comes first, in bold. A user's columns stay on
+    their device; an admin's become the team's default. The admin page's category Pareto
+    has the same columns, rank-by and Categories / All types switch.
+  - On a phone the bar moves under the names, full width.
   - Tap *Planned (P)* or *Unplanned (U)* in its legend to filter the page.
   - **All types** opens the categories up into every type of touch (P1 Parts change, P1
     Loading recipe and so on); **Categories** folds them back.
@@ -366,6 +385,20 @@ filter:** tap a donut slice, a bar, a quadrant, an hour or a heatmap cell and th
 page narrows to it. Each chart keeps showing its own alternatives, with the chosen one
 highlighted, so you can switch quickly. **Present** hides the app chrome, goes full
 screen and enlarges everything for a meeting room screen.
+
+## Tutorials
+
+Six videos of a minute or so each, recorded on a tablet in portrait: Capture, the Log, the
+Guide, editing the production line, Analysis, and Setup (touch types and people). Each pops
+up the first time a device opens that page (the line editor and Setup ones for admins only);
+*Later* closes it, *Don't show tutorials* stops the pop-ups on that device. They play
+without sound; **Sound on** (or the speaker in the video's controls) brings in quiet music. All six are in
+the profile menu (your initials, top right) under **Tutorials**.
+
+The videos stream from `media/tutorials/` and are not kept for offline use (they are about
+4 MB each). The music is "Calm Piano 1 (Vaporware)" by The Cynic Project, CC0 (public
+domain). To record
+them again after a screen changes, see `tools/tutorials/README.md`.
 
 ## Getting files out
 

@@ -76,6 +76,11 @@ state.icons ??= { zones: {} };   // chosen icons: { zones: { name: icon } }, sha
 state.lineDrawings ??= [];   // the team's saved line drawings (besides K3), shared through Setup sync
 state.drawingId ??= null;    // which drawing this device shows; null = the one for my line, else K3
 state.logRunId ??= null;     // run shown in the Log: null = the one being logged into, 'all' = every run
+state.chartCols ??= {};      // chart id → the team's Pareto columns, set by an admin (Setup sync)
+state.chartColsMine ??= {};  // a user's own Pareto columns, on this device only
+state.tiles ??= null;        // the team's three Analysis tiles, set by an admin (Setup sync)
+state.tilesMine ??= null;    // a user's own three tiles, on this device only
+state.tutorials ??= {};      // tutorial id → when this device first saw it (so each pops up once)
 applyFramework(state.framework);
 applyColors(state.colors);
 
