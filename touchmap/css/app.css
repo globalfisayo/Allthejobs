@@ -1639,8 +1639,6 @@ body.present .rk .bar { height: 22px; }
 .tut-video { display: block; width: 100%; height: 100%; object-fit: contain; background: #ECEBE7; }
 .tut-missing { display: flex; align-items: center; justify-content: center; gap: 8px; height: 100%; margin: 0; padding: 24px; text-align: center; color: var(--ink-3); }
 .tut-blurb { margin: 12px 0 0; font-size: 15px; }
-.tut-later { display: flex; align-items: center; gap: 6px; margin: 6px 0 0; }
-.tut-later .ico { width: 16px; height: 16px; flex: none; }
 .tut-list { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 8px; }
 .tut-item { display: flex; align-items: center; gap: 14px; width: 100%; padding: 8px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); text-align: left; font: inherit; color: inherit; cursor: pointer; }
 .tut-item:hover, .tut-item:focus-visible { border-color: var(--ink-3); }
@@ -1652,3 +1650,15 @@ body.present .rk .bar { height: 22px; }
 .tut-done { display: grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 50%; background: #E6F4EC; color: var(--ok); }
 .tut-done .ico { width: 16px; height: 16px; }
 .tut-sound[aria-pressed="true"] { border-color: var(--ink); }
+/* the welcome after setting up, once */
+.welcome-tour .wiz-top { align-items: flex-start; }
+.wt-ico { display: grid; place-items: center; width: 52px; height: 52px; border-radius: 16px; background: var(--surface); border: 1px solid var(--line); }
+.wt-ico .ico { width: 26px; height: 26px; }
+.welcome-tour h2 { margin: 14px 0 4px; font-size: 24px; }
+.welcome-tour p { margin: 6px 0 0; }
+.wt-lead { font-size: 16px; }
+.wt-list { list-style: none; margin: 12px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 6px; }
+.wt-list li { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 10px; background: var(--surface); border: 1px solid var(--line); font-size: 14px; font-weight: 650; }
+.wt-list .ico { width: 16px; height: 16px; color: var(--ink-3); flex: none; }
+.wt-later { display: flex; align-items: center; gap: 6px; margin-top: 12px !important; }
+.wt-later .ico { width: 15px; height: 15px; flex: none; }

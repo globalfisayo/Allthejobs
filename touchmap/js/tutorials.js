@@ -1,7 +1,8 @@
-// Short tutorial videos, one per page. Each pops up the first time this device opens that page
-// (admin pages for admins only); all of them are in the profile menu under Tutorials.
+// Short tutorial videos, one per page, all under Tutorials in the profile menu. Nothing pops up
+// page by page: once, when someone finishes setting up (or an admin first signs in), a welcome
+// points to the tutorials and can simply be closed.
 // The videos stream from media/tutorials/ (not cached for offline use: they are large).
-import { state, save, timer, isPassiveCopy } from './store.js';
+import { state, save, isPassiveCopy } from './store.js';
 import { isAdmin } from './auth.js';
 import { h, clear, icon, openModal, closeModal } from './ui.js';
 
@@ -24,13 +25,12 @@ export const tutorialPoster = (t) => `media/tutorials/${t.id}.jpg`;
 const tutorialThumb = (t) => `media/tutorials/${t.id}-thumb.jpg`;
 
 const record = () => (state.tutorials && typeof state.tutorials === 'object' ? state.tutorials : (state.tutorials = {}));
-const seen = (id) => !!record()[id]?.seen;
 function mark(id, key) {
   const r = record();
   r[id] = { ...(r[id] || {}), [key]: r[id]?.[key] || new Date().toISOString() };
   save();
 }
-/** Pop-ups are skipped under test automation, unless a test asks for them. */
+/** The welcome is skipped under test automation, unless a test asks for it. */
 function popupsOn() {
   let pref = null;
   try { pref = localStorage.getItem('touchmap:tutorials'); } catch { /* storage blocked */ }
@@ -39,23 +39,44 @@ function popupsOn() {
   return !navigator.webdriver;
 }
 
-/** The first visit to a page on this device: offer its tutorial once. */
-export function maybeTutorial(route) {
-  const t = TUTORIALS.find(x => x.route === route);
-  if (!t || seen(t.id) || (t.admin && !isAdmin()) || isPassiveCopy() || !popupsOn()) return;
-  let tries = 0;
-  const show = () => {
-    if (document.body.dataset.route !== route || document.getElementById('modal')?.open || document.body.classList.contains('present') || timer.running()) return;
-    // let a message (say the welcome after setting up) finish first
-    const msg = document.getElementById('toast');
-    if (msg && !msg.hidden && tries++ < 12) { setTimeout(show, 500); return; }
-    mark(t.id, 'seen');
-    openTutorial(t.id, { first: true });
-  };
-  setTimeout(show, 900);
+/* ---------- the welcome, once per device ---------- */
+let pending = null;
+/** Ask for the welcome after setting up; true when it will show (so no other welcome is needed). */
+export function requestWelcome(profile = null) {
+  if (record().welcome?.seen || !popupsOn() || isPassiveCopy()) return false;
+  pending = { profile };
+  return true;
+}
+/** Called after a page is drawn: shows the welcome if one was asked for. */
+export function maybeWelcome() {
+  if (!pending) return;
+  const { profile } = pending;
+  pending = null;
+  setTimeout(() => {
+    if (document.getElementById('modal')?.open) return;
+    mark('welcome', 'seen');
+    openWelcome(profile);
+  }, 500);
+}
+function openWelcome(p) {
+  const list = TUTORIALS.filter(t => !t.admin || isAdmin());
+  const where = p ? [p.plantName, p.lineCustom ? p.lineName : p.line].filter(Boolean).join(' · ') : '';
+  const box = h('div', { class: 'confirm welcome-tour' },
+    h('div', { class: 'wiz-top' },
+      h('span', { class: 'wt-ico' }, icon('graduation-cap')),
+      h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Close', onclick: () => closeModal() }, icon('close'))),
+    h('h2', { text: p?.name ? `Welcome, ${p.name}` : 'Welcome to Touch Map' }),
+    where ? h('p', { class: 'muted', text: `You’re mapping ${where}.` }) : null,
+    h('p', { class: 'wt-lead', text: `Watch the tutorials to see how to use the app: ${list.length} short videos, about a minute each.` }),
+    h('ul', { class: 'wt-list' }, list.map(t => h('li', {}, icon(t.ico), h('span', { text: t.title })))),
+    h('p', { class: 'muted small wt-later' }, icon('info'), 'They are always there: tap your initials, top right, then Tutorials.'),
+    h('div', { class: 'row-end' },
+      h('button', { type: 'button', class: 'btn ghost', onclick: () => closeModal() }, 'Close'),
+      h('button', { type: 'button', class: 'btn primary', onclick: () => openTutorials() }, icon('circle-play'), 'Watch the tutorials')));
+  openModal(box, { label: 'Welcome' });
 }
 
-function player(t, { first = false, onBack = null, onNext = null } = {}) {
+function player(t, { onBack = null, onNext = null } = {}) {
   // muted to start (the music is optional): Sound on, or the speaker in the controls, turns it on
   const video = h('video', { class: 'tut-video', controls: true, playsinline: true, muted: true, preload: 'metadata', poster: tutorialPoster(t), 'aria-label': `Tutorial video: ${t.title}` },
     h('source', { src: tutorialSrc(t), type: 'video/mp4' }));
@@ -80,23 +101,10 @@ function player(t, { first = false, onBack = null, onNext = null } = {}) {
         h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Close', onclick: () => closeModal() }, icon('close')))),
     h('div', { class: 'tut-frame' }, video),
     h('p', { class: 'tut-blurb', text: t.blurb }),
-    first ? h('p', { class: 'muted small tut-later' }, icon('graduation-cap'), 'Shown once. Watch it again any time: tap your initials, top right, then Tutorials.') : null,
     h('div', { class: 'row-end' },
-      first ? h('button', { type: 'button', class: 'btn ghost', onclick: () => { for (const x of TUTORIALS) mark(x.id, 'seen'); closeModal(); } }, 'Don’t show tutorials') : null,
-      first ? h('button', { type: 'button', class: 'btn ghost', onclick: () => closeModal() }, 'Later') : null,
-      !first && next && onNext ? h('button', { type: 'button', class: 'btn ghost', onclick: () => onNext(next) }, `Next: ${next.title}`, icon('chevronRight')) : null,
+      next && onNext ? h('button', { type: 'button', class: 'btn ghost', onclick: () => onNext(next) }, `Next: ${next.title}`, icon('chevronRight')) : null,
       sound,
       h('button', { type: 'button', class: 'btn primary', onclick: () => { video.play()?.catch(() => {}); } }, icon('circle-play'), 'Play')));
-}
-
-/** One tutorial in a dialog. */
-export function openTutorial(id, { first = false } = {}) {
-  const t = TUTORIALS.find(x => x.id === id);
-  if (!t) return;
-  const box = h('div', { class: 'confirm tut-modal' });
-  const show = (x, f = false) => clear(box, player(x, { first: f, onNext: (y) => show(y) }));
-  show(t, first);
-  openModal(box, { label: `Tutorial: ${t.title}` });
 }
 
 const dur = (s) => (s ? `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}` : '');
