@@ -391,11 +391,13 @@ screen and enlarges everything for a meeting room screen.
 Six videos of a minute or so each, recorded on a tablet in portrait: Capture, the Log, the
 Guide, editing the production line, Analysis, and Setup (touch types and people). Each pops
 up the first time a device opens that page (the line editor and Setup ones for admins only);
-*Later* closes it, *Don't show tutorials* stops the pop-ups on that device. All six are in
+*Later* closes it, *Don't show tutorials* stops the pop-ups on that device. They play
+without sound; **Sound on** (or the speaker in the video's controls) brings in quiet music. All six are in
 the profile menu (your initials, top right) under **Tutorials**.
 
 The videos stream from `media/tutorials/` and are not kept for offline use (they are about
-4 MB each). The music is "Apple Cider" by Zane Little Music, CC0 (public domain). To record
+4 MB each). The music is "Calm Piano 1 (Vaporware)" by The Cynic Project, CC0 (public
+domain). To record
 them again after a screen changes, see `tools/tutorials/README.md`.
 
 ## Getting files out

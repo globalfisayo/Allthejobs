@@ -56,8 +56,18 @@ export function maybeTutorial(route) {
 }
 
 function player(t, { first = false, onBack = null, onNext = null } = {}) {
-  const video = h('video', { class: 'tut-video', controls: true, playsinline: true, preload: 'metadata', poster: tutorialPoster(t), 'aria-label': `Tutorial video: ${t.title}` },
+  // muted to start (the music is optional): Sound on, or the speaker in the controls, turns it on
+  const video = h('video', { class: 'tut-video', controls: true, playsinline: true, muted: true, preload: 'metadata', poster: tutorialPoster(t), 'aria-label': `Tutorial video: ${t.title}` },
     h('source', { src: tutorialSrc(t), type: 'video/mp4' }));
+  video.muted = true; video.defaultMuted = true;
+  const sound = h('button', { type: 'button', class: 'btn ghost tut-sound', onclick: () => { video.muted = !video.muted; } });
+  const paintSound = () => {
+    clear(sound, icon(video.muted ? 'volume-x' : 'volume-2'), video.muted ? 'Sound off' : 'Sound on');
+    sound.setAttribute('aria-pressed', String(!video.muted));
+    sound.title = video.muted ? 'Turn the music on' : 'Turn the music off';
+  };
+  video.addEventListener('volumechange', paintSound);
+  paintSound();
   video.addEventListener('play', () => mark(t.id, 'watched'), { once: true });
   video.addEventListener('error', () => video.replaceWith(h('p', { class: 'tut-missing' }, icon('cloudOff'), 'This video needs a connection. Try again when the tablet is online.')), true);
   const n = TUTORIALS.indexOf(t);
@@ -75,6 +85,7 @@ function player(t, { first = false, onBack = null, onNext = null } = {}) {
       first ? h('button', { type: 'button', class: 'btn ghost', onclick: () => { for (const x of TUTORIALS) mark(x.id, 'seen'); closeModal(); } }, 'Don’t show tutorials') : null,
       first ? h('button', { type: 'button', class: 'btn ghost', onclick: () => closeModal() }, 'Later') : null,
       !first && next && onNext ? h('button', { type: 'button', class: 'btn ghost', onclick: () => onNext(next) }, `Next: ${next.title}`, icon('chevronRight')) : null,
+      sound,
       h('button', { type: 'button', class: 'btn primary', onclick: () => { video.play()?.catch(() => {}); } }, icon('circle-play'), 'Play')));
 }
 
@@ -97,7 +108,7 @@ export function openTutorials() {
   const list = () => clear(box,
     h('div', { class: 'wiz-top' }, h('h2', {}, icon('graduation-cap'), ' Tutorials'),
       h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Close', onclick: () => closeModal() }, icon('close'))),
-    h('p', { class: 'muted small', text: 'A minute or so each, on a tablet like yours. Music on: turn the sound up.' }),
+    h('p', { class: 'muted small', text: 'A minute or so each, on a tablet like yours. They play without sound; tap Sound on for some quiet music.' }),
     h('ul', { class: 'tut-list' }, TUTORIALS.map((t, i) => {
       const r = record()[t.id] || {};
       return h('li', {}, h('button', { type: 'button', class: 'tut-item', 'data-tut': t.id, onclick: () => show(t) },

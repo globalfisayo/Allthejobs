@@ -1651,3 +1651,4 @@ body.present .rk .bar { height: 22px; }
 .tut-txt { flex: 1 1 auto; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .tut-done { display: grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 50%; background: #E6F4EC; color: var(--ok); }
 .tut-done .ico { width: 16px; height: 16px; }
+.tut-sound[aria-pressed="true"] { border-color: var(--ink); }

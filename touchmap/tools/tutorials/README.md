@@ -12,5 +12,6 @@ Re-record a tutorial when its screen changes.
 3. Finish it: `tools/tutorials/finish.sh capture`.
 4. Put the new length in seconds in `js/tutorials.js` (`secs`).
 
-Music: “Apple Cider” by Zane Little Music, released under CC0 (public domain) on OpenGameArt.
+Music: “Calm Piano 1 (Vaporware)” by The Cynic Project, released under CC0 (public domain) on
+OpenGameArt: soft pads and a slow piano melody. The videos play muted until someone taps Sound on.
 `finish.sh` downloads it the first time; it is not kept in the repository.
