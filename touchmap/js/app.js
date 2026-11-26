@@ -20,7 +20,7 @@ import { initMinibar, showMinibar } from './minibar.js';
 import { paintAvatar } from './usermenu.js';
 import { initTabs } from './tabs.js';
 import { setPassive } from './store.js';
-import { maybeTutorial } from './tutorials.js';
+import { requestWelcome, maybeWelcome } from './tutorials.js';
 
 // Each view renders into the main element; one that keeps timers or listeners returns a cleanup.
 const ROUTES = {
@@ -33,8 +33,9 @@ const ROUTES = {
   setup: (el) => renderSetup(el, { onChange: paintChrome }),
   diagram: (el) => renderDiagramEditor(el),
   admin: (el) => renderAdmin(el),
-  login: (el) => renderLogin(el, { onDone: () => { ensureSync(); go(state.profile?.at || isAdmin() ? landing() : '#welcome'); } }),
-  welcome: (el) => renderWelcome(el, { onDone: (p) => { toast(`Welcome, ${p.name}. Mapping ${p.plantName} · ${p.lineCustom ? p.lineName : p.line}.`); go(landing()); } }),
+  login: (el) => renderLogin(el, { onDone: () => { ensureSync(); if (isAdmin()) requestWelcome(); go(state.profile?.at || isAdmin() ? landing() : '#welcome'); } }),
+  // set up: a welcome pointing to the tutorials, once per device (else the short welcome message)
+  welcome: (el) => renderWelcome(el, { onDone: (p) => { if (!requestWelcome(p)) toast(`Welcome, ${p.name}. Mapping ${p.plantName} · ${p.lineCustom ? p.lineName : p.line}.`); go(landing()); } }),
 };
 // Tabs a route belongs under, for the highlight.
 const TAB_OF = { report: 'run', diagram: 'guide' };
@@ -108,7 +109,7 @@ function renderRoute({ keepScroll = false } = {}) {
   showMinibar(!GATES.has(r) && r !== 'capture' && r !== 'admin');
   if (!GATES.has(r)) paintChrome();
   window.scrollTo(0, keepScroll ? y : 0);
-  if (!GATES.has(r) && !keepScroll) maybeTutorial(r);
+  if (!GATES.has(r)) maybeWelcome();
 }
 
 // When another device's touches arrive, refresh the views that show them (not Capture, Runs or

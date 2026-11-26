@@ -1,6 +1,6 @@
 // Offline shell: everything the app needs is cached on first visit, so it works on a
 // line with no Wi-Fi. Bump VERSION when files change; old caches are dropped.
-const VERSION = 'touchmap-v10';
+const VERSION = 'touchmap-v11';
 const FILES = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css',
   'js/app.js', 'js/framework.js', 'js/framework-data.js', 'js/model.js', 'js/store.js', 'js/ui.js',
