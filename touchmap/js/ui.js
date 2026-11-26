@@ -249,12 +249,21 @@ export function pickFile(accept) {
 }
 
 /* ---------- formatting ---------- */
+function clock12(d, sec = false) {
+  const p = (n) => String(n).padStart(2, '0');
+  const hr = d.getHours();
+  return `${hr % 12 || 12}:${p(d.getMinutes())}${sec ? ':' + p(d.getSeconds()) : ''} ${hr < 12 ? 'am' : 'pm'}`;
+}
 export const fmt = {
   int: (n) => (n == null || !isFinite(n) ? '–' : Math.round(n).toLocaleString('en-GB')),
   dec: (n, dp = 1) => (n == null || !isFinite(n) ? '–' : n.toLocaleString('en-GB', { minimumFractionDigits: dp, maximumFractionDigits: dp })),
   pct: (n, dp = 0) => (n == null || !isFinite(n) ? '–' : (n * 100).toLocaleString('en-GB', { minimumFractionDigits: dp, maximumFractionDigits: dp }) + '%'),
-  time: (iso) => (iso ? new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : ''),
-  timeSec: (iso) => (iso ? new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : ''),
+  // on screen, a 12-hour clock: 4:00 pm (exports keep 16:00 for the data)
+  time: (iso) => (iso ? clock12(new Date(iso)) : ''),
+  timeSec: (iso) => (iso ? clock12(new Date(iso), true) : ''),
+  /** An hour of the day ('16') → '4 pm'; as a range → '4:00–4:59 pm'. */
+  hour: (hh) => { const n = Number(hh); return `${n % 12 || 12} ${n < 12 ? 'am' : 'pm'}`; },
+  hourRange: (hh) => { const n = Number(hh); return `${n % 12 || 12}:00–${n % 12 || 12}:59 ${n < 12 ? 'am' : 'pm'}`; },
   day: (iso) => (iso ? new Date(iso).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }) : ''),
   dayKey: (iso) => {
     if (!iso) return '';

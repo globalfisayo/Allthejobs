@@ -55,7 +55,7 @@ export function renderCapture(root) {
   }
 
   function clearForm() {
-    Object.assign(draft, { planned: '', category: '', type: '', touchType: '', count: 1, countMode: 'all', perOccMin: null, durManual: false, description: '' });
+    Object.assign(draft, { zone: '', who: '', planned: '', category: '', type: '', touchType: '', count: 1, countMode: 'all', perOccMin: null, durManual: false, description: '' });
     form.refreshAll(); save(); paintSummary();
   }
 

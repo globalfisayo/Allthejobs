@@ -10,7 +10,7 @@ const { TUTORIALS } = await import('../js/tutorials.js');
 
 test('Pareto columns: the default order is code, icon, category, type, bar; minutes and %', () => {
   assert.deepEqual(DEFAULT_COLS.order, ['code', 'icon', 'category', 'type', 'bar']);
-  assert.deepEqual(colsFor('category'), { order: ['code', 'icon', 'category', 'type', 'bar'], hidden: [], values: ['pct', 'minutes'] });
+  assert.deepEqual(colsFor('category'), { order: ['code', 'icon', 'category', 'type', 'bar'], hidden: [], values: ['pct', 'minutes'], widths: {} });
 });
 
 test('Pareto columns: any stored choice comes back complete and clean', () => {
@@ -20,6 +20,7 @@ test('Pareto columns: any stored choice comes back complete and clean', () => {
   assert.deepEqual(c.values, ['touches']);
   assert.deepEqual(normaliseCols(null).order, DEFAULT_COLS.order);
   assert.deepEqual(normaliseCols({ values: [] }).values, [], 'a bar with no numbers is allowed');
+  assert.deepEqual(normaliseCols({ widths: { category: 180.4, bar: 5, type: 99999, nope: 50, code: 'x' } }).widths, { category: 180, bar: 28, type: 900 }, 'widths: known columns, rounded, within limits');
 });
 
 test('a user’s columns stay theirs; without one, the team’s apply', async () => {

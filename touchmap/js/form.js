@@ -36,6 +36,21 @@ export function touchForm(model, opts) {
     return { el, body };
   }
 
+  // A choice can fold the list (a category picked before Planned / Unplanned hides the other
+  // group): keep the tapped option under the finger instead of letting the page jump, which
+  // made it look as if the tap had missed.
+  function keepUnder(btn, find, fn) {
+    const y0 = btn.getBoundingClientRect().top;
+    fn();
+    const now = find();
+    if (!now) return;
+    const dy = now.getBoundingClientRect().top - y0;
+    if (Math.abs(dy) < 2) return;
+    let sc = now.parentElement;
+    while (sc && sc !== document.body && !(/(auto|scroll)/.test(getComputedStyle(sc).overflowY) && sc.scrollHeight > sc.clientHeight)) sc = sc.parentElement;
+    if (sc && sc !== document.body) sc.scrollTop += dy; else window.scrollBy(0, dy);
+  }
+
   // a picked option stays solid; the others fade back
   function chips(list, current, pick, { allowClear = false, cls = '', iconFor = null } = {}) {
     return h('div', { class: 'chips ' + cls + (current ? ' has-pick' : ''), role: 'group' },
@@ -91,7 +106,7 @@ export function touchForm(model, opts) {
           groups.length > 1 ? h('div', { class: 'cat-group-h', text: isP ? 'Planned' : 'Unplanned' }) : null,
           h('div', { class: 'cats' + (model.category ? ' has-pick' : '') }, CATEGORIES.filter(c => c.planned === isP && (!c.hidden || c.code === model.category)).map(c => h('button', {
             type: 'button', class: 'cat' + (c.code === model.category ? ' on' : ''), 'aria-pressed': String(c.code === model.category),
-            onclick: () => { setCategory(model, c.code); changed('planned', 'category', 'type', 'touchType'); },
+            onclick: (e) => keepUnder(e.currentTarget, () => s.body.querySelector('.cat.on'), () => { setCategory(model, c.code); changed('planned', 'category', 'type', 'touchType'); }),
           }, h('span', { class: 'code ' + (c.planned ? 'code-p' : 'code-u'), text: c.code }), h('span', { class: 'cat-ico' }, icon(categoryIcon(c.code))), h('span', { class: 'cat-name', text: c.short })))))),
         cat ? h('p', { class: 'rule' }, h('strong', { text: cat.code + ' when: ' }), CATEGORY_RULE[cat.code] || cat.rule || 'Added in Setup.') : null);
     };

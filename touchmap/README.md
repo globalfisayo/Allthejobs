@@ -104,7 +104,12 @@ Admins see a shield next to the gear. It opens one page for the whole business u
    | **The timer covers** | *All occurrences* divides the time by Count. *One occurrence* means you timed one and counted the rest. |
    | **Save untimed** | For touches under 5 seconds: count them, don't time them. |
    | **Help me choose** | Walks the framework's 15-question category order and stops at the first yes. |
-   | **Same as last** | Copies the previous touch's answers. |
+   | **Same as last** | Copies the previous touch's answers (zone, person, category…) in one tap. |
+   | **Clear** | Empties the form, zone and person included. |
+
+   Every new touch starts fresh at **Zone / equipment**: the first question is always where.
+   Picking a category before Planned/Unplanned folds the list to that group; the option you
+   tapped stays under your finger rather than jumping away.
 
    Picking a type of touch shows its *How to count* guide and pre-selects the guide's
    Physical/Information answer, with a warning if you change it. The stopwatch survives
@@ -336,7 +341,9 @@ The Analysis tab, from the top:
     the table. **Rank by** minutes or touches (it follows the tiles until you choose).
   - **Columns**, left to right by default: the code chip (P1 … U8), the icon, the category,
     the type of touch (for a category, its biggest one, "+3" for the others) and the bar.
-    Drag a column's name sideways to move it, or tap its × to hide it. The columns button
+    Drag a column's name sideways to move it, or tap its × to hide it. Drag the thin line
+    at the right edge of a column's name to make it wider or narrower (double-tap the line to
+    reset it; *Reset column widths* in the columns panel resets them all). The columns button
     (next to the chart types) lists them all: tick to show or hide, drag the handle or use
     the arrows to reorder, and choose what the bar shows: %, minutes, touches, any one, two
     or all three. The number it is ranked by comes first, in bold. A user's columns stay on
@@ -402,6 +409,12 @@ The videos stream from `media/tutorials/` and are not kept for offline use (they
 4 MB each). The music is "Calm Piano 1 (Vaporware)" by The Cynic Project, CC0 (public
 domain). To record
 them again after a screen changes, see `tools/tutorials/README.md`.
+
+## Times
+
+Times on screen use a 12-hour clock: 4:00 pm, and *4 pm* on the hour axis of *When in the
+shift*. Exports (CSV, Excel, the team sheet) keep the 24-hour form (16:00) so the data sorts
+and calculates the same everywhere.
 
 ## Getting files out
 
