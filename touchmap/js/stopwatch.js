@@ -69,7 +69,8 @@ export const watch = {
     run.touches.push(t);
     markTouch(run, t.id);
     state.lastSavedId = t.id;
-    state.draft = blankTouch({ zone: draft.zone, who: draft.who });
+    // every touch starts fresh at Zone (Same as last copies the previous answers in one tap)
+    state.draft = blankTouch();
     timer.reset();
     save(); askPersist(); keepAwake(false);
     const num = run.touches.length;

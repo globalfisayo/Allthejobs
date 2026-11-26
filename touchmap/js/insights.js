@@ -47,7 +47,7 @@ const DIMS = {
   touchType: { label: 'Touch type', get: t => t.touchType },
   who: { label: 'Person', get: t => t.who },
   type: { label: 'Type of touch', get: typeKey, name: v => v.replace('\u0000', ' · ') },
-  hour: { label: 'Hour', get: hourOf, name: v => `${v}:00–${v}:59` },
+  hour: { label: 'Hour', get: hourOf, name: v => fmt.hourRange(v) },
 };
 const DIM_KEYS = Object.keys(DIMS);
 const activeDims = () => DIM_KEYS.filter(d => F[d]);
@@ -421,12 +421,12 @@ function shiftCard(touches) {
     render: (kind) => {
       if (!rows.length) return h('p', { class: 'empty', text: 'No timed touches yet.' });
       const ctx = ctxFor('hour');
-      const cols = rows.map(r => ({ key: r.k, label: `${r.k}:00–${r.k}:59`, short: r.k, rest: [`${fmt.int(r.touches)} touches`],
+      const cols = rows.map(r => ({ key: r.k, label: fmt.hourRange(r.k), short: fmt.hour(r.k), rest: [`${fmt.int(r.touches)} touches`],
         segs: [{ value: r.Planned, colour: COLOUR.Planned, label: 'Planned' }, { value: r.Unplanned, colour: COLOUR.Unplanned, label: 'Unplanned' }, { value: r.none, colour: COLOUR.none, label: 'Not set' }] }));
-      if (kind === 'line') return linesChart(rows.map(r => ({ key: r.k, label: `${r.k}:00`, short: r.k })), [
+      if (kind === 'line') return linesChart(rows.map(r => ({ key: r.k, label: fmt.hourRange(r.k), short: fmt.hour(r.k) })), [
         { label: 'Planned', colour: COLOUR.Planned, values: rows.map(r => r.Planned) },
         { label: 'Unplanned', colour: COLOUR.Unplanned, values: rows.map(r => r.Unplanned) }], ctx);
-      if (kind === 'table') return itemsTable(rows.map(r => ({ key: r.k, label: `${r.k}:00–${r.k}:59`, value: r.Planned + r.Unplanned + r.none, touches: r.touches })), { label: 'Hour' });
+      if (kind === 'table') return itemsTable(rows.map(r => ({ key: r.k, label: fmt.hourRange(r.k), value: r.Planned + r.Unplanned + r.none, touches: r.touches })), { label: 'Hour' });
       return columns(cols, ctx);
     },
   });

@@ -20,6 +20,7 @@ export const VALUES = {
   minutes: { label: 'Minutes', long: 'Time in minutes' },
   touches: { label: 'Touches', long: 'Number of touches' },
 };
+const MIN_W = 28, MAX_W = 900;
 export const DEFAULT_COLS = Object.freeze({ order: ['code', 'icon', 'category', 'type', 'bar'], hidden: [], values: ['minutes', 'pct'] });
 
 /** Any stored shape → a complete, valid column choice. */
@@ -29,7 +30,10 @@ export function normaliseCols(c) {
   for (const k of DEFAULT_COLS.order) if (!order.includes(k)) order.push(k);
   const hidden = Array.isArray(c?.hidden) ? [...new Set(c.hidden.filter(k => known.includes(k)))] : [];
   const values = Array.isArray(c?.values) ? Object.keys(VALUES).filter(k => c.values.includes(k)) : [...DEFAULT_COLS.values];
-  return { order: [...new Set(order)], hidden, values };
+  // widths in px, set by dragging a column's edge; a column without one sizes itself
+  const widths = {};
+  for (const [k, w] of Object.entries(c?.widths && typeof c.widths === 'object' ? c.widths : {})) if (known.includes(k) && Number.isFinite(+w)) widths[k] = Math.max(MIN_W, Math.min(MAX_W, Math.round(+w)));
+  return { order: [...new Set(order)], hidden, values, widths };
 }
 /** Mine, else the team's, else the default. */
 export function colsFor(id) {
@@ -80,10 +84,47 @@ export function rankList(items, ctx, { cfg = DEFAULT_COLS, measure = 'minutes', 
   const width = { code: 'max-content', icon: 'max-content', category: 'minmax(0, 0.9fr)', type: 'minmax(0, 1fr)', bar: 'minmax(6.5em, 2.4fr)' };
   const shown = cols.filter(k => k !== 'code' || hasCode);
 
-  const head = h('div', { class: 'rk-head' }, shown.map(k => h('div', { class: 'rk-hc rk-' + k, 'data-key': k, title: 'Drag to move this column' },
+  const W = c.widths || {};
+  const tracks = (over = {}) => shown.map(k => (over[k] || W[k] ? `${over[k] || W[k]}px` : width[k])).join(' ');
+  const resizer = (k) => {
+    if (!onCfg) return null;
+    const label = COLS[k].label;
+    const btn = h('button', { type: 'button', class: 'rk-resize', 'aria-label': `Width of the ${label} column: drag, or the arrow keys; double-tap to reset`, title: 'Drag to change the width · double-tap to reset' });
+    let drag = null;
+    btn.addEventListener('pointerdown', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const cell = btn.closest('.rk-hc');
+      drag = { x: e.clientX, w: cell.getBoundingClientRect().width, now: null, id: e.pointerId };
+      btn.classList.add('on'); btn.closest('.rk').classList.add('resizing');
+      try { btn.setPointerCapture(e.pointerId); } catch { /* fine */ }
+    });
+    btn.addEventListener('pointermove', (e) => {
+      if (!drag || e.pointerId !== drag.id) return;
+      drag.now = Math.max(MIN_W, Math.min(MAX_W, Math.round(drag.w + e.clientX - drag.x)));
+      btn.closest('.rk').style.setProperty('--rk-cols', tracks({ [k]: drag.now }));
+    });
+    const end = () => {
+      if (!drag) return;
+      const { now, w } = drag; drag = null;
+      btn.classList.remove('on'); btn.closest('.rk')?.classList.remove('resizing');
+      if (now != null && Math.abs(now - w) > 2) onCfg({ ...c, widths: { ...W, [k]: now } });
+    };
+    btn.addEventListener('pointerup', end);
+    btn.addEventListener('pointercancel', end);
+    btn.addEventListener('dblclick', () => { const w = { ...W }; delete w[k]; onCfg({ ...c, widths: w }); });
+    btn.addEventListener('keydown', (e) => {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      e.preventDefault();
+      const cur = W[k] || Math.round(btn.closest('.rk-hc').getBoundingClientRect().width);
+      onCfg({ ...c, widths: { ...W, [k]: cur + (e.key === 'ArrowRight' ? 12 : -12) } });
+    });
+    return btn;
+  };
+  const head = h('div', { class: 'rk-head' }, shown.map(k => h('div', { class: 'rk-hc rk-' + k + (W[k] ? ' sized' : ''), 'data-key': k, title: 'Drag to move this column' },
     h('span', { class: 'rk-grip', 'aria-hidden': 'true' }, icon('grip-horizontal')),
     h('span', { class: 'rk-hl', text: k === 'bar' ? (vals.length ? vals.map(v => VALUES[v].label).join(' · ') : 'Bar') : k === 'type' && mode !== 'types' ? 'Biggest type' : COLS[k].label }),
-    onCfg ? h('button', { type: 'button', class: 'rk-hide', 'aria-label': `Hide the ${COLS[k].label} column`, title: 'Hide', onclick: () => onCfg({ ...c, hidden: [...c.hidden, k] }) }, icon('x')) : null)));
+    onCfg ? h('button', { type: 'button', class: 'rk-hide', 'aria-label': `Hide the ${COLS[k].label} column`, title: 'Hide', onclick: () => onCfg({ ...c, hidden: [...c.hidden, k] }) }, icon('x')) : null,
+    resizer(k))));
   if (onCfg) sortable(head, { items: '.rk-hc', axis: 'x', onDrop: (keys) => onCfg({ ...c, order: [...keys, ...c.order.filter(k => !keys.includes(k))] }) });
 
   let run = 0;
@@ -113,7 +154,7 @@ export function rankList(items, ctx, { cfg = DEFAULT_COLS, measure = 'minutes', 
   });
     // on a narrow screen the bar takes its own line under the names
   const narrow = shown.filter(k => k !== 'bar').map(k => width[k]).join(' ') || '1fr';
-  return h('div', { class: 'rk-box' }, h('div', { class: 'rk', style: { '--rk-cols': shown.map(k => width[k]).join(' '), '--rk-cols-narrow': narrow }, 'data-measure': measure }, head, rows));
+  return h('div', { class: 'rk-box' }, h('div', { class: 'rk', style: { '--rk-cols': tracks(), '--rk-cols-narrow': narrow }, 'data-measure': measure }, head, rows));
 }
 
 /** The column panel: tick to show, drag (or the arrows) to reorder, and what the bar shows. */
@@ -140,6 +181,8 @@ export function openColumnsPanel(id, { mode = 'categories', onChange } = {}) {
         h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Close', onclick: () => closeModal() }, icon('close'))),
       h('p', { class: 'muted small', text: isAdmin() ? 'You are an admin: these columns become the team’s default.' : 'Saved on this device. An admin sets the team’s default.' }),
       list,
+      Object.keys(c.widths || {}).length ? h('button', { type: 'button', class: 'btn ghost small cp-widths', onclick: () => apply({ ...c, widths: {} }) }, icon('columns-3'), 'Reset column widths') : null,
+      h('p', { class: 'muted small cp-tip', text: 'To change a column’s width, drag the edge of its name in the chart; double-tap the edge to reset it.' }),
       h('h3', { class: 'cp-h' }, 'The bar shows'),
       h('div', { class: 'chips cp-values', role: 'group', 'aria-label': 'The bar shows' }, Object.entries(VALUES).map(([k, v]) => {
         const on = c.values.includes(k);
