@@ -70,7 +70,8 @@ export function renderLogin(root, { onDone }) {
       h('div', { class: 'gate-brand' }, brandMark(), h('div', {}, h('h1', { text: 'Touch Map' }), h('p', { class: 'muted', text: 'Time and categorise every touch on the line.' }))),
       form,
       h('p', { class: 'gate-foot muted small' }, icon('users'), ' One shared login for your organisation. New here? Sign in, then set up your plant and name.'))));
-  setTimeout(() => user.focus(), 50);
+  // focus the username, unless someone (or a password manager) is already typing
+  setTimeout(() => { if (!form.contains(document.activeElement)) user.focus(); }, 50);
 }
 
 /* ---------- onboarding ---------- */

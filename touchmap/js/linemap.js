@@ -300,7 +300,7 @@ function tint(hex, k) {
 export const ZONE_KEYS = zonesOnDiagram(defaultDiagram());
 
 /* ---------- the process map in Analysis: where the touches and the minutes are ---------- */
-const PM = { metric: 'touches' };
+const PM = { metric: 'minutes' };
 const METRICS = {
   touches: { label: 'Touches', ico: 'pointer', fmt: (v) => fmt.int(v), unit: 'touches' },
   minutes: { label: 'Time (minutes)', ico: 'clock', fmt: (v) => fmtMin(v), unit: 'min' },
@@ -322,8 +322,11 @@ const zoneTally = (touches) => {
 /**
  * touches: what the page shows, with every filter except zone, so every machine is on the map.
  * planned / onPlanned: the page's planned filter, also set from here.
+ * metric / onMetric: what the badges and the heat show (touches, minutes or events); the page's
+ * tiles set it, and the Show list here overrides it.
  */
-export function processMapCard({ touches, planned = '', onPlanned, onFilterZone }) {
+export function processMapCard({ touches, planned = '', onPlanned, onFilterZone, metric = null, onMetric = null }) {
+  if (metric && METRICS[metric]) PM.metric = metric;
   const card = h('section', { class: 'card pm-card' });
   let board = null;
   function paint() {
@@ -333,7 +336,7 @@ export function processMapCard({ touches, planned = '', onPlanned, onFilterZone 
     const max = Math.max(0, ...[...by.values()].map(v => v[PM.metric]));
     const total = [...by.values()].reduce((s, v) => s + v[PM.metric], 0);
     const metricSel = h('select', { 'aria-label': 'Show on the map' }, Object.entries(METRICS).map(([k, x]) => h('option', { value: k, selected: k === PM.metric, text: x.label })));
-    metricSel.addEventListener('change', () => { PM.metric = metricSel.value; paint(); });
+    metricSel.addEventListener('change', () => { PM.metric = metricSel.value; if (onMetric) onMetric(PM.metric); else paint(); });
     const plannedSel = h('select', { 'aria-label': 'Planned or unplanned', class: planned ? 'on' : '' },
       [['', 'Planned + unplanned'], ['Planned', 'Planned only'], ['Unplanned', 'Unplanned only']].map(([v, t]) => h('option', { value: v, selected: v === planned, text: t })));
     plannedSel.addEventListener('change', () => onPlanned?.(plannedSel.value));

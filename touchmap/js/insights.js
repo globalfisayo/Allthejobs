@@ -13,6 +13,7 @@ import { zoneColour } from './colors.js';
 import { zoneIcon, personIcon, categoryIcon, plannedIcon, touchTypeIcon } from './iconmap.js';
 import { markSetup, save } from './store.js';
 import { isAdmin } from './auth.js';
+import { rankList, colsFor, setCols, columnsButton } from './rank.js';
 
 const SVGNS = 'http://www.w3.org/2000/svg';
 const COLOUR = {
@@ -29,7 +30,9 @@ const LEVER = {
 
 /* ---------- filters ---------- */
 const F = { runs: [], run: '', day: '', observer: '', planned: '', category: '', zone: '', touchType: '', who: '', type: '', hour: '' };
-const UI = { catOrder: 'pareto', typeSort: 'minutes', typeAll: false, filtersOpen: false, catLevel: 'categories', advanced: false };
+// measure: what the tiles put on the process map and the Pareto (minutes or touches);
+// mapBy / paretoBy: that card's own choice, until a tile is tapped again.
+const UI = { catOrder: 'pareto', typeSort: 'minutes', typeAll: false, filtersOpen: false, catLevel: 'categories', advanced: false, measure: 'minutes', mapBy: null, paretoBy: null };
 let rootEl = null;
 
 const hourOf = (t) => { const iso = t.start || t.createdAt; return iso ? String(new Date(iso).getHours()).padStart(2, '0') : ''; };
@@ -211,8 +214,108 @@ function card(title, note, ...body) {
   return h('section', { class: 'card' }, h('h2', { class: 'card-h' }, CARD_ICON[title] ? icon(CARD_ICON[title]) : null, title), body, note ? infoNote(note) : null);
 }
 
-function tile(label, value, sub, ico) {
-  return h('div', { class: 'tile' }, h('div', { class: 'tile-label' }, ico ? icon(ico) : null, label), h('div', { class: 'tile-val', text: value }), sub ? h('div', { class: 'tile-sub', text: sub }) : null);
+/* ---------- the three numbers at the top ---------- */
+// Tap a number to put it on the process map and the Pareto (touches or minutes), or to filter
+// the page (the biggest category, machine, …). The pencil changes what a tile shows: a user's
+// choice stays on their device, an admin's becomes the team's default.
+export const TILE_OPTS = {
+  touches: { label: 'Touches', ico: 'hand', measure: 'touches' },
+  minutes: { label: 'Mapped minutes', ico: 'timer', measure: 'minutes' },
+  opHours: { label: 'Mapped op-hours', ico: 'users', measure: 'minutes' },
+  biggestCat: { label: 'Biggest category', ico: 'trophy', dim: 'category' },
+  biggestType: { label: 'Biggest type of touch', ico: 'tag', dim: 'type' },
+  busiestZone: { label: 'Busiest machine', ico: 'pin', dim: 'zone' },
+  plannedShare: { label: 'Planned share', ico: 'layers', dim: 'planned', fixed: 'Planned' },
+  unplanned: { label: 'Unplanned minutes', ico: 'warn', dim: 'planned', fixed: 'Unplanned' },
+  physicalShare: { label: 'Physical share', ico: 'hand-grab', dim: 'touchType', fixed: 'Physical' },
+  perTouch: { label: 'Minutes per touch', ico: 'clock', measure: 'minutes' },
+};
+export const DEFAULT_TILES = ['touches', 'minutes', 'biggestCat'];
+const TILE_INFO = { operators: 1, shiftHours: 1, breakHours: 0, shifts: 1 };
+const tilesOk = (a) => Array.isArray(a) && a.length === 3 && a.every(k => TILE_OPTS[k]) && new Set(a).size === 3;
+export function tilesFor() { return tilesOk(state.tilesMine) ? state.tilesMine : tilesOk(state.tiles) ? state.tiles : DEFAULT_TILES; }
+function setTiles(list) {
+  if (isAdmin()) { state.tiles = list; state.tilesMine = null; markSetup(); } else { state.tilesMine = list; save(); }
+  rerender();
+}
+function setMeasure(m) { UI.measure = m; UI.mapBy = null; UI.paretoBy = null; rerender(); }
+
+/** What a tile shows now: { value, sub, text (a name, not a number), on, pick, key }. */
+function tileData(k, sc, a) {
+  const o = TILE_OPTS[k];
+  const hd = a.headline;
+  const by = UI.measure === 'touches' ? 'touches' : 'minutes';
+  const of = by === 'touches' ? 'of touches' : 'of minutes';
+  if (o.measure) {
+    const on = UI.measure === o.measure;
+    const hint = on ? 'On the map and the Pareto' : 'Tap to show on the map';
+    if (k === 'touches') return { value: fmt.int(hd.touchesLogged), sub: `${fmt.int(a.rows)} logged events · ${hint}`, on, pick: () => setMeasure('touches') };
+    if (k === 'minutes') return { value: fmt.int(hd.minutes), sub: hint, on, pick: () => setMeasure('minutes') };
+    if (k === 'opHours') return { value: fmt.dec(hd.opHours), sub: hint, on, pick: () => setMeasure('minutes') };
+    return { value: hd.touchesLogged ? fmt.dec(hd.minutes / hd.touchesLogged, 1) : '–', sub: hint, on, pick: () => setMeasure('minutes') };
+  }
+  const blk = (dim) => analyse(filtered(sc.touches, [dim]), TILE_INFO, state.lists);
+  const share = (x, tot) => fmt.pct(tot ? x / tot : null);
+  if (o.fixed) {
+    const b = o.dim === 'planned' ? blk('planned').byPlanned : blk('touchType').byTouchType;
+    const get = (key) => b.items.find(i => i.key === key) || { minutes: 0, touches: 0 };
+    const pair = o.dim === 'planned' ? ['Planned', 'Unplanned'] : ['Physical', 'Information'];
+    const tot = pair.reduce((s, key) => s + get(key)[by], 0);
+    const on = F[o.dim] === o.fixed;
+    const pick = () => toggle({ [o.dim]: o.fixed });
+    if (k === 'unplanned') return { value: fmtMin(get('Unplanned').minutes), sub: `${share(get('Unplanned')[by], tot)} ${of} · tap to filter`, on, pick };
+    return { value: share(get(o.fixed)[by], tot), sub: `${pair[1]}: ${share(get(pair[1])[by], tot)} · tap to filter`, on, pick };
+  }
+  const b = blk(o.dim);
+  const items = (o.dim === 'category' ? b.byCategory : o.dim === 'zone' ? b.byZone : b.byType).items.filter(i => i.key !== NOT_SET && i[by] > 0);
+  const tot = items.reduce((s, i) => s + i[by], 0);
+  const top = [...items].sort((x, y) => y[by] - x[by] || y.minutes - x.minutes)[0];
+  if (!top) return { value: '–', sub: 'Nothing logged yet', text: true };
+  const on = F[o.dim] === top.key;
+  const pick = () => toggle({ [o.dim]: top.key });
+  if (o.dim === 'category') {
+    const c = CAT_BY_CODE[top.key];
+    return { value: c ? c.short : top.key, code: top.key, planned: c?.planned, sub: `${share(top[by], tot)} ${of} · tap to filter`, text: true, on, pick };
+  }
+  if (o.dim === 'type') return { value: top.type, code: top.code, planned: CAT_BY_CODE[top.code]?.planned, sub: `${share(top[by], tot)} ${of} · tap to filter`, text: true, on, pick };
+  return { value: top.key, sub: `${share(top[by], tot)} ${of} · tap to filter`, text: true, on, pick };
+}
+
+function tilesRow(sc, a) {
+  const keys = tilesFor();
+  return h('div', { class: 'tiles an-tiles' }, keys.map((k, slot) => {
+    const o = TILE_OPTS[k];
+    const d = tileData(k, sc, a);
+    return h('div', { class: 'tile an-tile' + (d.on ? ' on' : '') + (d.pick ? ' pickable' : ''), 'data-tile': k },
+      h('button', { type: 'button', class: 'tile-main', 'aria-pressed': d.pick ? String(!!d.on) : null, disabled: !d.pick, onclick: () => d.pick?.(),
+        'aria-label': `${o.label}: ${d.code ? d.code + ' ' : ''}${d.value}. ${d.sub || ''}` },
+        h('span', { class: 'tile-label' }, icon(o.ico), o.label),
+        h('span', { class: 'tile-val' + (d.text ? ' text' : '') }, d.code ? h('span', { class: 'code ' + (d.planned ? 'code-p' : 'code-u'), text: d.code }) : null, h('span', { text: d.value })),
+        d.sub ? h('span', { class: 'tile-sub', text: d.sub }) : null),
+      h('button', { type: 'button', class: 'tile-edit', title: 'Change what this tile shows', 'aria-label': `Change what this tile shows (now ${o.label})`, onclick: () => tilePicker(slot, sc, a) }, icon('pencil')));
+  }));
+}
+
+function tilePicker(slot, sc, a) {
+  const cur = tilesFor();
+  const box = h('div', { class: 'confirm tile-picker' },
+    h('div', { class: 'wiz-top' }, h('h2', {}, icon('pencil'), ` Tile ${slot + 1}: what it shows`),
+      h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Close', onclick: () => closeModal() }, icon('close'))),
+    h('p', { class: 'muted small', text: isAdmin() ? 'You are an admin: the three tiles become the team’s default.' : 'Saved on this device. An admin sets the team’s default.' }),
+    h('ul', { class: 'tp-list' }, Object.entries(TILE_OPTS).map(([k, o]) => {
+      const d = tileData(k, sc, a);
+      const where = cur.indexOf(k);
+      return h('li', {}, h('button', { type: 'button', class: 'tp-opt' + (where === slot ? ' on' : ''), 'aria-pressed': String(where === slot),
+        onclick: () => { const next = [...cur]; if (where >= 0) next[where] = cur[slot]; next[slot] = k; closeModal(); setTiles(next); } },
+      h('span', { class: 'tp-ico' }, icon(o.ico)),
+      h('span', { class: 'tp-txt' }, h('strong', { text: o.label }), h('span', { class: 'muted small', text: `${d.code ? d.code + ' ' : ''}${d.value}` })),
+      where >= 0 && where !== slot ? h('span', { class: 'tp-in muted small', text: `In tile ${where + 1} · swap` }) : where === slot ? icon('check') : null));
+    })),
+    h('div', { class: 'row-end' },
+      !isAdmin() && tilesOk(state.tilesMine) ? h('button', { type: 'button', class: 'btn ghost', onclick: () => { state.tilesMine = null; save(); closeModal(); rerender(); } }, icon('rotate-ccw'), 'Use the team’s tiles') : null,
+      isAdmin() ? h('button', { type: 'button', class: 'btn ghost', onclick: () => { closeModal(); setTiles([...DEFAULT_TILES]); } }, icon('rotate-ccw'), 'Default tiles') : null,
+      h('button', { type: 'button', class: 'btn primary', onclick: () => closeModal() }, icon('check'), 'Done')));
+  openModal(box, { label: 'Choose a tile' });
 }
 
 
@@ -271,7 +374,7 @@ function chartCard(id, title, ico, o) {
   cardEl.append(...[
     h('div', { class: 'chart-head' },
       h('h2', { class: 'card-h' }, icon(ico), title),
-      h('div', { class: 'chart-tools' }, kinds.length > 1 ? kindSwitch(kinds, kind, k => setKind(id, k)) : null, ann.button)),
+      h('div', { class: 'chart-tools' }, o.tools ? o.tools(kind) : null, kinds.length > 1 ? kindSwitch(kinds, kind, k => setKind(id, k)) : null, ann.button)),
     before ? h('div', { class: 'chart-before' }, before) : null,
     body,
     after ? h('div', { class: 'chart-after' }, after) : null,
@@ -524,17 +627,37 @@ export function renderInsights(root) {
   });
   const expanded = UI.catLevel === 'types';
 
+  // The Pareto's rows: ranked by what the tiles chose, unless the card says otherwise
+  const pBy = UI.paretoBy || (UI.measure === 'touches' ? 'touches' : 'minutes');
+  const mVal = (x) => (pBy === 'touches' ? x.touches : x.minutes) || 0;
+  const listKind = (kind) => kind === 'pareto' || kind === 'bars';
+  const typesByCat = new Map();
+  for (const r of catA.byType.items) { if (!typesByCat.has(r.code)) typesByCat.set(r.code, []); typesByCat.get(r.code).push(r); }
+  const catRank = catA.byCategory.items.filter(i => i.minutes > 0 || i.touches > 0).map(i => {
+    const c = CAT_BY_CODE[i.key];
+    const types = [...(typesByCat.get(i.key) || [])].sort((x, y) => mVal(y) - mVal(x) || y.minutes - x.minutes);
+    return { key: i.key === NOT_SET ? '' : i.key, code: c ? c.code : '?', planned: c ? c.planned : null, icon: c ? categoryIcon(c.code) : 'tag',
+      category: c ? c.short : 'Not categorised', categoryFull: c?.name, type: types[0]?.type || '', typeMore: Math.max(0, types.length - 1),
+      minutes: i.minutes, touches: i.touches, colour: catColour(i) };
+  });
+  const typeRank = typeRows.map(r => {
+    const c = CAT_BY_CODE[r.code];
+    return { key: r.key, code: r.code, planned: c ? c.planned : null, icon: categoryIcon(r.code), category: c?.short || r.code, categoryFull: c?.name, type: r.type,
+      minutes: r.minutes, touches: r.touches, colour: c?.planned ? COLOUR.Planned : COLOUR.Unplanned };
+  });
+  const top3 = catRank.filter(r => r.key && mVal(r) > 0).sort((x, y) => mVal(y) - mVal(x)).slice(0, 3);
+  const catSum = catRank.reduce((s, r) => s + mVal(r), 0);
+  const top3Share = catSum ? top3.reduce((s, r) => s + mVal(r), 0) / catSum : null;
+
   clear(root, h('section', { class: 'insights' },
     head,
     filterBar(sc),
     a.incomplete ? h('a', { class: 'banner warn', href: '#log' }, icon('warn'), `${a.incomplete} ${a.incomplete === 1 ? 'touch is' : 'touches are'} not fully categorised and ${a.incomplete === 1 ? 'shows' : 'show'} as “not set”.`) : null,
 
-    h('div', { class: 'tiles an-tiles' },
-      tile('Touches', fmt.int(hd.touchesLogged), `${a.rows} rows`, 'hand'),
-      tile('Mapped minutes', fmt.int(hd.minutes), null, 'timer'),
-      tile('Mapped op-hours', fmt.dec(hd.opHours), null, 'users')),
+    tilesRow(sc, a),
 
-    processMapCard({ touches: filtered(sc.touches, ['zone']), planned: F.planned, onPlanned: (v) => { F.planned = v; rerender(); }, onFilterZone: (z) => { F.zone = z; rerender(); } }),
+    processMapCard({ touches: filtered(sc.touches, ['zone']), planned: F.planned, onPlanned: (v) => { F.planned = v; rerender(); }, onFilterZone: (z) => { F.zone = z; rerender(); },
+      metric: UI.mapBy || UI.measure, onMetric: (m) => { UI.mapBy = m === UI.measure ? null : m; rerender(); } }),
 
     h('div', { class: 'grid-2' },
       chartCard('planned', 'Planned vs unplanned', 'layers', {
@@ -550,6 +673,7 @@ export function renderInsights(root) {
 
     chartCard('category', 'By category', 'tag', {
       kinds: ['pareto', 'bars', 'columns', 'donut', 'table'], def: 'pareto', note: expanded ? 'Every type of touch, biggest first. Tap one to filter the page.' : NOTES.category,
+      tools: (kind) => (listKind(kind) ? columnsButton('category', { mode: expanded ? 'types' : 'categories', onChange: rerender }) : null),
       before: (kind) => [
         h('div', { class: 'card-tools' },
           // tapping Planned or Unplanned filters the page to it
@@ -560,18 +684,40 @@ export function renderInsights(root) {
                 type: 'button', class: 'seg-btn' + (UI.catLevel === k ? ' on' : ''), 'aria-pressed': String(UI.catLevel === k), title: k === 'types' ? 'Expand: every type of touch, like P1 Parts change' : 'Collapse to the categories',
                 onclick: () => { UI.catLevel = k; rerender(); },
               }, icon(ico), t))),
+            listKind(kind) ? h('div', { class: 'seg small rank-by', role: 'group', 'aria-label': 'Rank by' },
+              h('span', { class: 'seg-lbl', text: 'Rank by' }),
+              [['minutes', 'Minutes', 'timer'], ['touches', 'Touches', 'hand']].map(([k, t, ico]) => h('button', {
+                type: 'button', class: 'seg-btn' + (pBy === k ? ' on' : ''), 'aria-pressed': String(pBy === k), title: UI.paretoBy ? 'Chosen here' : 'Follows the tiles at the top',
+                onclick: () => { UI.paretoBy = k === (UI.measure === 'touches' ? 'touches' : 'minutes') ? null : k; rerender(); },
+              }, icon(ico), t))) : null,
             !expanded && (kind === 'bars' || kind === 'columns' || kind === 'table') ? h('div', { class: 'seg small', role: 'group', 'aria-label': 'Order' },
               [['pareto', 'Biggest first'], ['framework', 'P1 → U7']].map(([k, t]) => h('button', {
                 type: 'button', class: 'seg-btn' + (UI.catOrder === k ? ' on' : ''), 'aria-pressed': String(UI.catOrder === k),
                 onclick: () => { UI.catOrder = k; rerender(); },
               }, t))) : null)),
-        !expanded && catA.top3.length ? h('p', { class: 'callout' },
-          h('strong', { text: `Top ${catA.top3.length} = ${fmt.pct(catA.top3Share)} of mapped minutes. ` }),
-          catA.top3.map(i => CAT_BY_CODE[i.key]?.name).filter(Boolean).join(' · ')) : null],
-      render: (kind) => (expanded
-        ? itemsChart(kind, kind === 'table' ? typeItems : typeItems.slice(0, kind === 'donut' ? 12 : 25), 'type', { label: 'Type of touch', cum: true })
-        : itemsChart(kind, toItems(catItems, { label: i => CAT_BY_CODE[i.key]?.name || 'Not categorised', short: i => i.key, rich: i => catLabel(i, true), colour: catColour }), 'category',
-          { label: 'Category', cum: UI.catOrder === 'pareto', highlight: i => UI.catOrder === 'pareto' && top3Codes.has(i.key) })),
+        !expanded && top3.length ? h('p', { class: 'callout' },
+          h('strong', { text: `Top ${top3.length} = ${fmt.pct(top3Share)} of ${pBy === 'touches' ? 'touches' : 'mapped minutes'}. ` }),
+          top3.map(r => r.categoryFull || r.category).join(' · ')) : null],
+      render: (kind) => {
+        if (listKind(kind)) {
+          const rowsAll = expanded ? typeRank : catRank;
+          if (!rowsAll.some(r => mVal(r) > 0)) return h('p', { class: 'empty', text: 'Nothing logged here yet.' });
+          const ranked = kind === 'pareto' || expanded || UI.catOrder === 'pareto';
+          const big = [...rowsAll].sort((x, y) => mVal(y) - mVal(x));
+          const rows = expanded && !UI.typeAll ? big.slice(0, 25) : rowsAll;
+          return h('div', { class: kind === 'pareto' ? 'pareto' : 'rank-bars' },
+            rankList(rows, ctxFor(expanded ? 'type' : 'category'), { cfg: colsFor('category'), measure: pBy, ranked, mode: expanded ? 'types' : 'categories',
+              onCfg: (cfg) => { setCols('category', cfg); rerender(); } }),
+            expanded && big.length > 25 ? h('button', { type: 'button', class: 'btn ghost small more-btn', onclick: () => { UI.typeAll = !UI.typeAll; rerender(); } },
+              icon(UI.typeAll ? 'chevrons-down-up' : 'chevrons-up-down'), UI.typeAll ? 'Show the top 25' : `Show all ${big.length} types`) : null,
+            kind === 'pareto' ? h('details', { class: 'tbl-wrap' }, h('summary', { text: 'Table with the cumulative share' }),
+              itemsTable(rowsAll.map(r => ({ key: r.key, label: [r.code, expanded ? r.type : r.categoryFull || r.category].filter(Boolean).join(' · '), value: r.minutes, touches: r.touches })), { label: expanded ? 'Type of touch' : 'Category', cum: true })) : null);
+        }
+        return expanded
+          ? itemsChart(kind, kind === 'table' ? typeItems : typeItems.slice(0, kind === 'donut' ? 12 : 25), 'type', { label: 'Type of touch', cum: true })
+          : itemsChart(kind, toItems(catItems, { label: i => CAT_BY_CODE[i.key]?.name || 'Not categorised', short: i => i.key, rich: i => catLabel(i, true), colour: catColour }), 'category',
+            { label: 'Category', cum: UI.catOrder === 'pareto', highlight: i => UI.catOrder === 'pareto' && top3Codes.has(i.key) });
+      },
     }),
 
     UI.advanced ? h('section', { class: 'advanced', 'aria-label': 'Advanced charts' },
