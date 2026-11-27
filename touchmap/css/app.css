@@ -1682,3 +1682,21 @@ button, a, summary, label, .chip, .cat, .type, .seg-btn, select { touch-action: 
 .cp-tip { margin: 8px 0 0; }
 @container (max-width: 560px) { .rk-box .rk-resize { display: none; } }
 .rk-hc:last-child .rk-resize { right: 0; }
+
+/* comments typed while logging, in the machine pop-ups */
+.zi-notes .zone-h { display: flex; align-items: center; gap: 6px; }
+.zi-notes .zone-h .ico { width: 17px; height: 17px; }
+.zi-note-list { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 8px; }
+.zi-note { padding: 10px 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
+.zi-note-h { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 14px; }
+.zi-note-h strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.zi-note-t { margin: 6px 0 4px; font-size: 15px; line-height: 1.4; white-space: pre-wrap; overflow-wrap: anywhere; }
+.zi-more { margin-top: 8px; }
+.zi-more > summary { cursor: pointer; font-weight: 700; font-size: 14px; color: var(--red-700); list-style: none; }
+.zi-more > summary::-webkit-details-marker { display: none; }
+/* the map, after a tap in the Pareto: what it's showing, and a short outline */
+.pm-focus { margin-top: 8px; gap: 6px; }
+.pm-focus .ico { width: 15px; height: 15px; }
+.pm-card { scroll-margin-top: 12px; }
+.pm-card.pm-flash { animation: pmflash 1.4s ease-out 1; }
+@keyframes pmflash { 0%, 35% { box-shadow: 0 0 0 3px var(--ink); } 100% { box-shadow: 0 0 0 3px transparent; } }

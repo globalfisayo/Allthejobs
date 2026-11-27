@@ -384,7 +384,7 @@ function chartCard(id, title, ico, o) {
 }
 /** One renderer per kind for a list of items. */
 function itemsChart(kind, items, dim, opts = {}) {
-  const ctx = ctxFor(dim);
+  const ctx = opts.ctx || ctxFor(dim);
   if (!items.length || !items.some(i => i.value > 0)) return h('p', { class: 'empty', text: 'Nothing logged here yet.' });
   if (kind === 'donut') return donutChart(items, ctx, opts.donut || {});
   if (kind === 'columns') return catColumns(items, ctx);
@@ -397,6 +397,22 @@ const toItems = (list, { label = i => i.key, short, rich, colour = () => COLOUR.
   value: i.minutes, touches: i.touches, pct: i.pct, colour: colour(i),
   rest: [`${fmt.int(i.touches)} touches · ${fmt.dec(i.opHours, 2)} op-hours`, i.cum != null ? `cumulative ${fmt.pct(i.cum)}` : null].filter(Boolean),
 }));
+
+/** Bring the process map into view (under the sticky bars) and outline it for a moment. */
+function scrollToMap() {
+  const card = rootEl?.querySelector('.pm-card');
+  if (!card) return;
+  const bar = document.querySelector('.appbar');
+  const f = rootEl.querySelector('.an-filters');
+  const over = (bar && getComputedStyle(bar).display !== 'none' ? bar.offsetHeight : 0) + (f && getComputedStyle(f).position === 'sticky' ? f.offsetHeight : 0);
+  window.scrollTo({ top: Math.max(0, card.getBoundingClientRect().top + window.scrollY - over - 10), behavior: 'smooth' });
+  card.classList.remove('pm-flash'); void card.offsetWidth; card.classList.add('pm-flash');
+}
+/** A chart whose taps filter the page and then show the map with the result. */
+const ctxToMap = (dim) => {
+  const base = ctxFor(dim);
+  return { ...base, pick: (key) => { const on = F[dim] !== key; toggle({ [dim]: key }); if (on) setTimeout(scrollToMap, 30); } };
+};
 
 /* ---------- when in the shift ---------- */
 function shiftCard(touches) {
@@ -657,7 +673,9 @@ export function renderInsights(root) {
     tilesRow(sc, a),
 
     processMapCard({ touches: filtered(sc.touches, ['zone']), planned: F.planned, onPlanned: (v) => { F.planned = v; rerender(); }, onFilterZone: (z) => { F.zone = z; rerender(); },
-      metric: UI.mapBy || UI.measure, onMetric: (m) => { UI.mapBy = m === UI.measure ? null : m; rerender(); } }),
+      metric: UI.mapBy || UI.measure, onMetric: (m) => { UI.mapBy = m === UI.measure ? null : m; rerender(); },
+      focus: F.type ? { label: DIMS.type.name(F.type), onClear: () => { F.type = ''; rerender(); } }
+        : F.category ? { label: `${F.category} ${CAT_BY_CODE[F.category]?.short || ''}`.trim(), onClear: () => { F.category = ''; rerender(); } } : null }),
 
     h('div', { class: 'grid-2' },
       chartCard('planned', 'Planned vs unplanned', 'layers', {
@@ -706,7 +724,7 @@ export function renderInsights(root) {
           const big = [...rowsAll].sort((x, y) => mVal(y) - mVal(x));
           const rows = expanded && !UI.typeAll ? big.slice(0, 25) : rowsAll;
           return h('div', { class: kind === 'pareto' ? 'pareto' : 'rank-bars' },
-            rankList(rows, ctxFor(expanded ? 'type' : 'category'), { cfg: colsFor('category'), measure: pBy, ranked, mode: expanded ? 'types' : 'categories',
+            rankList(rows, ctxToMap(expanded ? 'type' : 'category'), { cfg: colsFor('category'), measure: pBy, ranked, mode: expanded ? 'types' : 'categories',
               onCfg: (cfg) => { setCols('category', cfg); rerender(); } }),
             expanded && big.length > 25 ? h('button', { type: 'button', class: 'btn ghost small more-btn', onclick: () => { UI.typeAll = !UI.typeAll; rerender(); } },
               icon(UI.typeAll ? 'chevrons-down-up' : 'chevrons-up-down'), UI.typeAll ? 'Show the top 25' : `Show all ${big.length} types`) : null,
@@ -714,9 +732,9 @@ export function renderInsights(root) {
               itemsTable(rowsAll.map(r => ({ key: r.key, label: [r.code, expanded ? r.type : r.categoryFull || r.category].filter(Boolean).join(' · '), value: r.minutes, touches: r.touches })), { label: expanded ? 'Type of touch' : 'Category', cum: true })) : null);
         }
         return expanded
-          ? itemsChart(kind, kind === 'table' ? typeItems : typeItems.slice(0, kind === 'donut' ? 12 : 25), 'type', { label: 'Type of touch', cum: true })
+          ? itemsChart(kind, kind === 'table' ? typeItems : typeItems.slice(0, kind === 'donut' ? 12 : 25), 'type', { label: 'Type of touch', cum: true, ctx: ctxToMap('type') })
           : itemsChart(kind, toItems(catItems, { label: i => CAT_BY_CODE[i.key]?.name || 'Not categorised', short: i => i.key, rich: i => catLabel(i, true), colour: catColour }), 'category',
-            { label: 'Category', cum: UI.catOrder === 'pareto', highlight: i => UI.catOrder === 'pareto' && top3Codes.has(i.key) });
+            { label: 'Category', cum: UI.catOrder === 'pareto', highlight: i => UI.catOrder === 'pareto' && top3Codes.has(i.key), ctx: ctxToMap('category') });
       },
     }),
 

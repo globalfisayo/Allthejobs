@@ -28,7 +28,30 @@ function loggedAt(zone) {
     byType.set(k, v);
   }
   const types = [...byType.values()].sort((a, b) => b.minutes - a.minutes);
-  return { rows: rows.length, touches: types.reduce((s2, v) => s2 + v.touches, 0), minutes: types.reduce((s2, v) => s2 + v.minutes, 0), types };
+  return { rows: rows.length, touches: types.reduce((s2, v) => s2 + v.touches, 0), minutes: types.reduce((s2, v) => s2 + v.minutes, 0), types, list: rows };
+}
+
+/** The comments typed while logging at a machine, newest first: the first few, the rest folded. */
+function commentsBlock(list, { show = 4 } = {}) {
+  const notes = list.filter(t => (t.description || '').trim())
+    .sort((a, b) => String(b.start || b.createdAt || '').localeCompare(String(a.start || a.createdAt || '')));
+  if (!notes.length) return null;
+  const item = (t) => {
+    const c = CAT_BY_CODE[t.category];
+    const meta = [fmt.time(t.start || t.createdAt), t.who, t.observer ? `by ${t.observer}` : '', totalMinutes(t) ? `${fmtMin(totalMinutes(t))} min` : ''].filter(Boolean).join(' · ');
+    return h('li', { class: 'zi-note' },
+      h('div', { class: 'zi-note-h' },
+        h('span', { class: 'code ' + (c?.planned === false ? 'code-u' : c ? 'code-p' : 'code-x'), text: t.category || '?' }),
+        h('strong', { text: t.type || 'Type not set' })),
+      h('p', { class: 'zi-note-t', text: t.description.trim() }),
+      meta ? h('span', { class: 'muted small', text: meta }) : null);
+  };
+  return h('div', { class: 'zi-block zi-notes' },
+    h('h3', { class: 'zone-h' }, icon('message-square'), ` Comments logged here (${notes.length})`),
+    h('ul', { class: 'zi-note-list' }, notes.slice(0, show).map(item)),
+    notes.length > show ? h('details', { class: 'zi-more' },
+      h('summary', { text: `Show ${notes.length - show} more` }),
+      h('ul', { class: 'zi-note-list' }, notes.slice(show).map(item))) : null);
 }
 
 function heatOf(minutes, max) {
@@ -186,6 +209,7 @@ export function openZone(zone, { editing = false } = {}) {
       h('ul', { class: 'zone-run-list' }, here.types.slice(0, 5).map(v => h('li', {},
         h('span', { class: 'code ' + (CAT_BY_CODE[v.code]?.planned === false ? 'code-u' : CAT_BY_CODE[v.code] ? 'code-p' : 'code-x'), text: v.code || '?' }),
         h('span', { text: v.type }), h('span', { class: 'muted', text: ` ${fmt.int(v.touches)} · ${fmtMin(v.minutes)} min` }))))) : null,
+    !editing ? commentsBlock(here.list, { show: 3 }) : null,
     editing ? h('div', { class: 'zt-add' }, icon('plus'), h('strong', { text: 'Add a touch type here' }), addSel)
       : h('div', { class: 'row-gap' }, h('button', { type: 'button', class: 'btn primary', onclick: () => prefill(zone) }, icon('timer'), 'Log a touch here')),
     h('h3', { class: 'zone-h' }, h('span', { class: 'touch-ico' }, icon('pointer')), `Touches that happen here (${info.types.length})`),
@@ -325,7 +349,7 @@ const zoneTally = (touches) => {
  * metric / onMetric: what the badges and the heat show (touches, minutes or events); the page's
  * tiles set it, and the Show list here overrides it.
  */
-export function processMapCard({ touches, planned = '', onPlanned, onFilterZone, metric = null, onMetric = null }) {
+export function processMapCard({ touches, planned = '', onPlanned, onFilterZone, metric = null, onMetric = null, focus = null }) {
   if (metric && METRICS[metric]) PM.metric = metric;
   const card = h('section', { class: 'card pm-card' });
   let board = null;
@@ -345,7 +369,9 @@ export function processMapCard({ touches, planned = '', onPlanned, onFilterZone,
       h('div', { class: 'card-tools pm-head' },
         h('div', {},
           h('h2', { class: 'card-h' }, icon('map'), `The ${drawingName()} line`),
-          h('p', { class: 'muted small', text: `${m.label} at each machine${planned ? `, ${planned.toLowerCase()} only` : ''}: the redder, the more. Tap a machine for its numbers.` })),
+          h('p', { class: 'muted small', text: `${m.label} at each machine${planned ? `, ${planned.toLowerCase()} only` : ''}: the redder, the more. Tap a machine for its numbers.` }),
+          // what the page is filtered to (say, a category picked in the Pareto), with a way out
+          focus ? h('button', { type: 'button', class: 'chip small on pm-focus', title: 'Show everything again', onclick: focus.onClear }, icon('filter'), `Showing: ${focus.label}`, icon('x')) : null),
         h('div', { class: 'pm-ctl' },
           h('label', { class: 'filter' }, h('span', { text: 'Show' }), metricSel),
           h('label', { class: 'filter' }, h('span', { text: 'Planned / unplanned' }), plannedSel))),
@@ -446,6 +472,7 @@ export function openZoneInsights(zone, { touches = [], onFilter } = {}) {
             h('span', { class: 'zi-bar' }, h('span', { style: { width: `${topMin ? (v.minutes / topMin) * 100 : 0}%`, background: c?.planned === false ? 'var(--c-unplanned)' : 'var(--c-planned)' } })),
             h('span', { class: 'zi-val', text: `${fmtMin(v.minutes)} min · ${fmt.int(v.touches)}` }));
         }))) : null,
+      commentsBlock(here),
       people.length ? h('div', { class: 'zi-block' },
         h('h3', { class: 'zone-h', text: 'Who' }),
         h('div', { class: 'chips' }, people.map(([p, m2]) => h('span', { class: 'chip small with-ico' }, icon(personIcon(p)), `${p} · ${fmtMin(m2)} min`)))) : null,
