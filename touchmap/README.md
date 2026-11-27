@@ -332,10 +332,11 @@ The Analysis tab, from the top:
     the whole page.
   - Badges grow a little under the pointer.
   - Tap a machine for its numbers: touches, minutes, events, its share of all minutes, the
-    planned/unplanned and physical split, the types taking the most time, the **comments**
-    typed while logging there (newest first, with time, person and minutes), and who. The
-    guide's touch list for that machine is folded underneath. The Guide's machine pop-up
-    shows the run's comments too.
+    planned/unplanned and physical split, the types taking the most time, and who. **Tap a
+    type** under *Where the time goes here* to open its log: each touch's time, person,
+    who logged it, minutes, count and the comment typed (a speech-bubble count shows which
+    types have comments). The guide's touch list for that machine is folded underneath. In
+    the Guide's machine pop-up, the run's logged types open the same way.
   - From there, *Filter Analysis to this machine* or *Log a touch here*.
 - **Planned vs unplanned** and **Physical vs information.**
 - **By category:**
