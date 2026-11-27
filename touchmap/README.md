@@ -332,8 +332,11 @@ The Analysis tab, from the top:
     the whole page.
   - Badges grow a little under the pointer.
   - Tap a machine for its numbers: touches, minutes, events, its share of all minutes, the
-    planned/unplanned and physical split, the types taking the most time, and who. The
-    guide's touch list for that machine is folded underneath.
+    planned/unplanned and physical split, the types taking the most time, and who. **Tap a
+    type** under *Where the time goes here* to open its log: each touch's time, person,
+    who logged it, minutes, count and the comment typed (a speech-bubble count shows which
+    types have comments). The guide's touch list for that machine is folded underneath. In
+    the Guide's machine pop-up, the run's logged types open the same way.
   - From there, *Filter Analysis to this machine* or *Log a touch here*.
 - **Planned vs unplanned** and **Physical vs information.**
 - **By category:**
@@ -351,6 +354,9 @@ The Analysis tab, from the top:
     has the same columns, rank-by and Categories / All types switch.
   - On a phone the bar moves under the names, full width.
   - Tap *Planned (P)* or *Unplanned (U)* in its legend to filter the page.
+  - Tap a category (or a type of touch) to filter the page to it: the page scrolls up to the
+    process map, which then shows only that category and says so (*Showing: P7 …*, tap it
+    to show everything again).
   - **All types** opens the categories up into every type of touch (P1 Parts change, P1
     Loading recipe and so on); **Categories** folds them back.
 - **Advanced charts** (the button at the end of the filters; on a phone, under Present):

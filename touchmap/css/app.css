@@ -741,7 +741,7 @@ body.present .toast { bottom: 24px; }
 .zone-run { margin: 0 0 12px; padding: 12px 14px; background: var(--red-50); border: 1px solid var(--red-100); border-radius: 12px; }
 .zone-run p { margin: 2px 0 8px; }
 .zone-run-list { display: flex; flex-direction: column; gap: 5px; margin: 0; padding: 0; list-style: none; font-size: 14px; }
-.zone-run-list li { display: flex; align-items: center; gap: 8px; }
+.zone-run-list li { display: block; }
 .zone-h { margin: 18px 0 2px; font-size: 16px; }
 .zone-pop .small { margin: 0; }
 .zt-list { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
@@ -1525,7 +1525,7 @@ body.tab-passive .minibar, body.tab-passive .toast { display: none !important; }
 .zi-split-l .ico { width: 15px; height: 15px; vertical-align: -3px; color: var(--ink-3); }
 .zi-block { margin-top: 14px; }
 .zi-types { display: grid; gap: 6px; }
-.zi-type { display: grid; grid-template-columns: auto minmax(0, 1.4fr) minmax(60px, 1fr) auto; align-items: center; gap: 10px; padding: 8px 10px; background: var(--surface); border-radius: 12px; }
+.zi-type { display: grid; grid-template-columns: auto minmax(0, 1.4fr) minmax(60px, 1fr) auto auto auto; align-items: center; gap: 10px; padding: 8px 10px; background: var(--surface); border-radius: 12px; }
 .zi-type-name { font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .zi-bar { height: 8px; background: var(--track); border-radius: 4px; overflow: hidden; }
 .zi-bar span { display: block; height: 100%; border-radius: 4px; }
@@ -1682,3 +1682,31 @@ button, a, summary, label, .chip, .cat, .type, .seg-btn, select { touch-action: 
 .cp-tip { margin: 8px 0 0; }
 @container (max-width: 560px) { .rk-box .rk-resize { display: none; } }
 .rk-hc:last-child .rk-resize { right: 0; }
+
+/* each type at a machine opens its log: when, who, how long, the comment typed */
+.zi-type-d > summary, .zr-d > summary { list-style: none; cursor: pointer; }
+.zi-type-d > summary::-webkit-details-marker, .zr-d > summary::-webkit-details-marker { display: none; }
+.zi-type-d[open] > .zi-type { border-radius: 12px 12px 0 0; }
+.zi-chev { width: 16px; height: 16px; color: var(--ink-3); transition: transform .15s; }
+.zi-type-d[open] .zi-chev, .zr-d[open] .zi-chev { transform: rotate(180deg); }
+.zi-cc { display: inline-flex; align-items: center; gap: 3px; padding: 1px 7px; border-radius: 999px; background: #EFEFEC; color: var(--ink-2); font-size: 12px; font-weight: 750; }
+.zi-cc .ico { width: 13px; height: 13px; }
+.zi-hint { margin: -2px 0 8px; }
+.zi-log { list-style: none; margin: 0; padding: 4px 10px 10px 14px; background: var(--surface); border-radius: 0 0 12px 12px; display: grid; gap: 6px; }
+.zi-log-i { padding: 8px 10px; border-left: 3px solid var(--line); background: var(--surface-2); border-radius: 0 8px 8px 0; }
+.zi-log-meta { font-size: 12.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.zi-note-t { margin: 3px 0 0; font-size: 14.5px; line-height: 1.4; white-space: pre-wrap; overflow-wrap: anywhere; }
+.zi-note-t.none { color: #A3A3A0; font-style: italic; font-size: 13px; }
+.zi-more { margin-top: 8px; }
+.zi-more > summary { cursor: pointer; font-weight: 700; font-size: 14px; color: var(--red-700); list-style: none; margin-bottom: 6px; }
+.zi-more > summary::-webkit-details-marker { display: none; }
+.zr-d > summary { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
+.zr-d > summary .zi-chev { margin-left: auto; }
+.zr-d .zi-log { padding: 6px 0 4px; background: none; }
+@media (max-width: 560px) { .zi-type { grid-template-columns: auto minmax(0, 1fr) auto auto auto; } .zi-type .zi-bar { display: none; } }
+/* the map, after a tap in the Pareto: what it's showing, and a short outline */
+.pm-focus { margin-top: 8px; gap: 6px; }
+.pm-focus .ico { width: 15px; height: 15px; }
+.pm-card { scroll-margin-top: 12px; }
+.pm-card.pm-flash { animation: pmflash 1.4s ease-out 1; }
+@keyframes pmflash { 0%, 35% { box-shadow: 0 0 0 3px var(--ink); } 100% { box-shadow: 0 0 0 3px transparent; } }

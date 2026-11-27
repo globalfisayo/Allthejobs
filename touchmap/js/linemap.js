@@ -23,21 +23,27 @@ function loggedAt(zone) {
   const byType = new Map();
   for (const r of rows) {
     const k = `${r.category}\u0000${r.type}`;
-    const v = byType.get(k) || { code: r.category, type: r.type || 'Type not set', touches: 0, minutes: 0 };
-    v.touches += Number(r.count) || 0; v.minutes += totalMinutes(r);
+    const v = byType.get(k) || { code: r.category, type: r.type || 'Type not set', touches: 0, minutes: 0, list: [] };
+    v.touches += Number(r.count) || 0; v.minutes += totalMinutes(r); v.list.push(r);
     byType.set(k, v);
   }
   const types = [...byType.values()].sort((a, b) => b.minutes - a.minutes);
-  return { rows: rows.length, touches: types.reduce((s2, v) => s2 + v.touches, 0), minutes: types.reduce((s2, v) => s2 + v.minutes, 0), types };
+  return { rows: rows.length, touches: types.reduce((s2, v) => s2 + v.touches, 0), minutes: types.reduce((s2, v) => s2 + v.minutes, 0), types, list: rows };
 }
 
-function heatOf(minutes, max) {
-  if (!max || !minutes) return null;
-  const k = minutes / max;
-  // white → brand red, the analysis tab's magnitude ramp
-  const lerp = (a, b) => Math.round(a + (b - a) * k);
-  return { fill: `rgb(${lerp(255, 244)},${lerp(236, 0)},${lerp(237, 9)})`, dark: k > 0.55 };
+/** One type's log at a machine, newest first: when, who, minutes, and the comment typed. */
+const newestFirst = (a, b) => String(b.start || b.createdAt || '').localeCompare(String(a.start || a.createdAt || ''));
+function logList(list) {
+  return h('ul', { class: 'zi-log' }, [...list].sort(newestFirst).map(t => {
+    const n = Number(t.count) || 0;
+    const meta = [fmt.time(t.start || t.createdAt), t.who, t.observer ? `by ${t.observer}` : '', `${fmtMin(totalMinutes(t))} min`, n > 1 ? `× ${n}` : ''].filter(Boolean).join(' · ');
+    const note = (t.description || '').trim();
+    return h('li', { class: 'zi-log-i' },
+      h('span', { class: 'zi-log-meta', text: meta }),
+      note ? h('p', { class: 'zi-note-t', text: note }) : h('p', { class: 'zi-note-t none', text: 'No comment' }));
+  }));
 }
+const commentCount = (list) => list.filter(t => (t.description || '').trim()).length;
 
 /* ---------- prefill Capture ---------- */
 function prefill(zone, code, typeName) {
@@ -183,9 +189,13 @@ export function openZone(zone, { editing = false } = {}) {
     !editing && here.rows ? h('div', { class: 'zone-run' },
       h('div', { class: 'sum-h', text: `Logged here in ${activeRun().name}` }),
       h('p', {}, h('strong', { text: `${fmt.int(here.touches)} touches · ${fmtMin(here.minutes)} min` }), ` across ${here.rows} ${here.rows === 1 ? 'row' : 'rows'}`),
-      h('ul', { class: 'zone-run-list' }, here.types.slice(0, 5).map(v => h('li', {},
-        h('span', { class: 'code ' + (CAT_BY_CODE[v.code]?.planned === false ? 'code-u' : CAT_BY_CODE[v.code] ? 'code-p' : 'code-x'), text: v.code || '?' }),
-        h('span', { text: v.type }), h('span', { class: 'muted', text: ` ${fmt.int(v.touches)} · ${fmtMin(v.minutes)} min` }))))) : null,
+      h('ul', { class: 'zone-run-list' }, here.types.map(v => h('li', {}, h('details', { class: 'zr-d' },
+        h('summary', {},
+          h('span', { class: 'code ' + (CAT_BY_CODE[v.code]?.planned === false ? 'code-u' : CAT_BY_CODE[v.code] ? 'code-p' : 'code-x'), text: v.code || '?' }),
+          h('span', { text: v.type }), h('span', { class: 'muted', text: ` ${fmt.int(v.touches)} · ${fmtMin(v.minutes)} min` }),
+          commentCount(v.list) ? h('span', { class: 'zi-cc', title: 'Comments' }, icon('message-square'), String(commentCount(v.list))) : null,
+          icon('chevron', 'zi-chev')),
+        logList(v.list)))))) : null,
     editing ? h('div', { class: 'zt-add' }, icon('plus'), h('strong', { text: 'Add a touch type here' }), addSel)
       : h('div', { class: 'row-gap' }, h('button', { type: 'button', class: 'btn primary', onclick: () => prefill(zone) }, icon('timer'), 'Log a touch here')),
     h('h3', { class: 'zone-h' }, h('span', { class: 'touch-ico' }, icon('pointer')), `Touches that happen here (${info.types.length})`),
@@ -325,7 +335,7 @@ const zoneTally = (touches) => {
  * metric / onMetric: what the badges and the heat show (touches, minutes or events); the page's
  * tiles set it, and the Show list here overrides it.
  */
-export function processMapCard({ touches, planned = '', onPlanned, onFilterZone, metric = null, onMetric = null }) {
+export function processMapCard({ touches, planned = '', onPlanned, onFilterZone, metric = null, onMetric = null, focus = null }) {
   if (metric && METRICS[metric]) PM.metric = metric;
   const card = h('section', { class: 'card pm-card' });
   let board = null;
@@ -345,7 +355,9 @@ export function processMapCard({ touches, planned = '', onPlanned, onFilterZone,
       h('div', { class: 'card-tools pm-head' },
         h('div', {},
           h('h2', { class: 'card-h' }, icon('map'), `The ${drawingName()} line`),
-          h('p', { class: 'muted small', text: `${m.label} at each machine${planned ? `, ${planned.toLowerCase()} only` : ''}: the redder, the more. Tap a machine for its numbers.` })),
+          h('p', { class: 'muted small', text: `${m.label} at each machine${planned ? `, ${planned.toLowerCase()} only` : ''}: the redder, the more. Tap a machine for its numbers.` }),
+          // what the page is filtered to (say, a category picked in the Pareto), with a way out
+          focus ? h('button', { type: 'button', class: 'chip small on pm-focus', title: 'Show everything again', onclick: focus.onClear }, icon('filter'), `Showing: ${focus.label}`, icon('x')) : null),
         h('div', { class: 'pm-ctl' },
           h('label', { class: 'filter' }, h('span', { text: 'Show' }), metricSel),
           h('label', { class: 'filter' }, h('span', { text: 'Planned / unplanned' }), plannedSel))),
@@ -406,10 +418,10 @@ export function openZoneInsights(zone, { touches = [], onFilter } = {}) {
   for (const t of here) {
     if (!t.category) continue;
     const k = `${t.category}\u0000${t.type || 'Type not set'}`;
-    const v = byType.get(k) || { code: t.category, type: t.type || 'Type not set', touches: 0, minutes: 0 };
-    v.touches += count(t); v.minutes += mins(t); byType.set(k, v);
+    const v = byType.get(k) || { code: t.category, type: t.type || 'Type not set', touches: 0, minutes: 0, list: [] };
+    v.touches += count(t); v.minutes += mins(t); v.list.push(t); byType.set(k, v);
   }
-  const types = [...byType.values()].sort((a, b) => b.minutes - a.minutes).slice(0, 6);
+  const types = [...byType.values()].sort((a, b) => b.minutes - a.minutes);
   const topMin = types[0]?.minutes || 0;
   const who = new Map(); for (const t of here) if (t.who) who.set(t.who, (who.get(t.who) || 0) + mins(t));
   const people = [...who.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
@@ -438,14 +450,25 @@ export function openZoneInsights(zone, { touches = [], onFilter } = {}) {
           phys + inf ? h('span', {}, icon('hand'), ` Physical ${fmt.pct(phys / (phys + inf))}`) : null)) : null,
       types.length ? h('div', { class: 'zi-block' },
         h('h3', { class: 'zone-h', text: 'Where the time goes here' }),
-        h('div', { class: 'zi-types' }, types.map(v => {
-          const c = CAT_BY_CODE[v.code];
-          return h('div', { class: 'zi-type' },
-            h('span', { class: 'code ' + (c?.planned === false ? 'code-u' : c ? 'code-p' : 'code-x'), text: v.code }),
-            h('span', { class: 'zi-type-name', text: v.type }),
-            h('span', { class: 'zi-bar' }, h('span', { style: { width: `${topMin ? (v.minutes / topMin) * 100 : 0}%`, background: c?.planned === false ? 'var(--c-unplanned)' : 'var(--c-planned)' } })),
-            h('span', { class: 'zi-val', text: `${fmtMin(v.minutes)} min · ${fmt.int(v.touches)}` }));
-        }))) : null,
+        h('p', { class: 'muted small zi-hint', text: 'Tap one to see its log: when, who, how long, and the comment typed.' }),
+        (() => {
+          // each type opens its log; past the first six, the rest are folded
+          const row = (v) => {
+            const c = CAT_BY_CODE[v.code];
+            const cc = commentCount(v.list);
+            return h('details', { class: 'zi-type-d' },
+              h('summary', { class: 'zi-type' },
+                h('span', { class: 'code ' + (c?.planned === false ? 'code-u' : c ? 'code-p' : 'code-x'), text: v.code }),
+                h('span', { class: 'zi-type-name', text: v.type }),
+                h('span', { class: 'zi-bar' }, h('span', { style: { width: `${topMin ? (v.minutes / topMin) * 100 : 0}%`, background: c?.planned === false ? 'var(--c-unplanned)' : 'var(--c-planned)' } })),
+                h('span', { class: 'zi-val', text: `${fmtMin(v.minutes)} min · ${fmt.int(v.touches)}` }),
+                cc ? h('span', { class: 'zi-cc', title: `${cc} ${cc === 1 ? 'comment' : 'comments'}` }, icon('message-square'), String(cc)) : h('span'),
+                icon('chevron', 'zi-chev')),
+              logList(v.list));
+          };
+          return h('div', { class: 'zi-types' }, types.slice(0, 6).map(row),
+            types.length > 6 ? h('details', { class: 'zi-more' }, h('summary', { text: `Show ${types.length - 6} more types` }), h('div', { class: 'zi-types' }, types.slice(6).map(row))) : null);
+        })()) : null,
       people.length ? h('div', { class: 'zi-block' },
         h('h3', { class: 'zone-h', text: 'Who' }),
         h('div', { class: 'chips' }, people.map(([p, m2]) => h('span', { class: 'chip small with-ico' }, icon(personIcon(p)), `${p} · ${fmtMin(m2)} min`)))) : null,
